@@ -1,0 +1,42 @@
+# shellcheck shell=bash
+# Anser packaging for https://github.com/simoltos/oca.
+# shellcheck disable=SC2034,SC2154
+pkgname=oca
+pkgver=0.r2.g649251562fba
+pkgrel=1
+pkgdesc='Independent terminal agent'
+arch=('x86_64')
+url='https://github.com/simoltos/oca'
+license=('MIT')
+_commit=649251562fba65168947c943d5e6e106b93da621
+depends=('glibc' 'bash' 'curl' 'cjson' 'openssl')
+optdepends=('xdg-utils: open the browser for provider login'
+            'firefox>=140: browser tools for web search and page visits')
+source=("$pkgname-$_commit.tar.gz::https://codeload.github.com/simoltos/oca/tar.gz/$_commit")
+sha256sums=('4e0c152d0704f7a35b005a886b4b29703fbc625a5463e4185211b2c2bb239405')
+
+prepare() {
+    printf '{\n  "package": "%s",\n  "version": "%s",\n  "git_revision": "%s",\n  "working_tree_modified": false,\n  "source_archive_sha256": "%s",\n  "source_project": "%s"\n}\n' \
+        "$pkgname" "$pkgver-$pkgrel" "$_commit" "${sha256sums[0]}" "$pkgname" \
+        > "$srcdir/source.json"
+}
+
+build() {
+    make -C "$srcdir/$pkgname-$_commit" CC="${CC:-cc}" CPPFLAGS="${CPPFLAGS:-}" \
+        CFLAGS="$CFLAGS -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Wpedantic" \
+        LDFLAGS="$LDFLAGS"
+}
+
+check() {
+    make -C "$srcdir/$pkgname-$_commit" test
+}
+
+package() {
+    make -C "$srcdir/$pkgname-$_commit" install DESTDIR="$pkgdir" PREFIX=/usr \
+        MANUALDIR=/usr/share/oca/skills/oca-manual
+    install -Dm644 "$srcdir/$pkgname-$_commit/LICENSE" "$pkgdir/usr/share/licenses/oca/LICENSE"
+    install -Dm644 "$srcdir/source.json" "$pkgdir/usr/share/oca/source.json"
+    install -dm700 "$pkgdir/etc/skel/.oca"
+    install -dm755 "$pkgdir/etc/skel/.oca/skills"
+    ln -s /usr/share/oca/skills/oca-manual "$pkgdir/etc/skel/.oca/skills/oca-manual"
+}

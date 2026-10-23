@@ -1,0 +1,155 @@
+# Adapted from the Arch Linux packaging recipe for the Honk integration.
+# shellcheck shell=bash
+# shellcheck disable=SC2034,SC2154
+# Patch source: https://github.com/simoltos/honk/tree/2e1041b240256c733481f3732b3b790a1b2203d9/shell/data/compatibility
+# Maintainer: Fabian Bornschein <fabiscafe@archlinux.org>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+# Contributor: Jan de Groot <jgc@archlinux.org>
+
+pkgbase=nautilus
+pkgname=(
+  nautilus
+  libnautilus-extension
+  libnautilus-extension-docs
+)
+pkgver=51.1
+pkgrel=7
+pkgdesc="Default file manager for GNOME"
+url="https://apps.gnome.org/Nautilus/"
+arch=(x86_64)
+license=(GPL-3.0-or-later)
+depends=(
+  cairo
+  dconf
+  gdk-pixbuf2
+  gexiv2
+  glib2
+  glibc
+  glycin
+  glycin-gtk4
+  gnome-autoar
+  gnome-desktop-4
+  graphene
+  gst-plugins-base-libs
+  gstreamer
+  gtk4
+  gvfs
+  hicolor-icon-theme
+  icu
+  libadwaita
+  libcloudproviders
+  libgcc
+  libportal
+  libportal-gtk4
+  libx11
+  localsearch
+  pango
+  tinysparql
+  wayland
+  xdg-user-dirs-gtk
+)
+makedepends=(
+  appstream
+  blueprint-compiler
+  gi-docgen
+  git
+  glib2-devel
+  gobject-introspection
+  meson
+)
+checkdepends=(
+  python-gobject
+  weston
+)
+source=(
+  'nautilus-51.1.tar.xz::https://download.gnome.org/sources/nautilus/51/nautilus-51.1.tar.xz'
+  'nautilus-51.1.patch'
+)
+sha256sums=(
+  'a703bc152d18d161d9dab957e2390a36e6246bb5c24de7b15c9624fcfa2f2816'
+  'f58714831fa77ca9ea77def8d6b283877429a36c873614f3f8d0f4d3232cd4ab'
+)
+
+prepare() {
+  patch -d "$srcdir/nautilus-51.1" -Np1 -i "$srcdir/nautilus-51.1.patch"
+}
+
+build() {
+  local meson_options=(
+    -D docs=true
+    -D tests=all
+    -D packagekit=false
+    -D selinux=false
+  )
+
+  # Inject libgxdp
+  export MESON_WRAP_MODE=nodownload
+
+  arch-meson "$srcdir/nautilus-51.1" build "${meson_options[@]}"
+  meson compile -C build
+}
+
+check() (
+  export XDG_RUNTIME_DIR="$PWD/runtime-dir"
+  install -d -m700 "$XDG_RUNTIME_DIR"
+
+  export WAYLAND_DISPLAY=wl-${pkgname[0]}-$RANDOM
+  weston --backend=headless --socket="$WAYLAND_DISPLAY" --idle-time=0 &
+  _w=$!
+
+  trap 'kill "$_w" 2>/dev/null || true; wait "$_w" || true' EXIT
+
+  export NO_AT_BRIDGE=1 GTK_A11Y=none
+
+  # Tracker tests cannot set up inner sandbox
+  meson test -C build -j2 --print-errorlogs --suite displayless --no-suite tracker
+  GIO_USE_VFS=local GIO_USE_VOLUME_MONITOR=unix \
+    meson test -C build --print-errorlogs test-file-operations-transfer-result
+)
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#"$pkgdir"/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_nautilus() {
+  provides+=(honk-nautilus-51)
+  depends+=(libnautilus-extension.so)
+  groups=(gnome)
+
+  meson install -C build --no-rebuild --destdir "$pkgdir"
+
+  cd "$pkgdir" || return
+
+  _pick libne usr/include
+  _pick libne usr/lib/{girepository-1.0,libnautilus-extension*,pkgconfig}
+  _pick libne usr/share/gir-1.0
+
+  _pick ldocs usr/share/doc
+}
+
+package_libnautilus-extension() {
+  pkgdesc="Extension interface for Nautilus"
+  depends=(
+    glib2
+    glibc
+    libgcc
+  )
+  provides=(libnautilus-extension.so)
+
+  mv libne/* "$pkgdir"
+}
+
+package_libnautilus-extension-docs() {
+  pkgdesc="Extension interface for Nautilus (documentation)"
+  depends=()
+
+  mv ldocs/* "$pkgdir"
+}
+
+# vim:set sw=2 sts=-1 et:

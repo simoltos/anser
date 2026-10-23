@@ -1,0 +1,85 @@
+--- a/libgnome-desktop/gnome-idle-monitor.c
++++ b/libgnome-desktop/gnome-idle-monitor.c
+@@ -67,7 +67,7 @@
+ 			 G_IMPLEMENT_INTERFACE (G_TYPE_INITABLE,
+ 						gnome_idle_monitor_initable_iface_init))
+ 
+-#define IDLE_MONITOR_PATH "/org/gnome/Mutter/IdleMonitor/Core"
++#define IDLE_MONITOR_PATH "/org/honk/HWin/IdleMonitor/Core"
+ 
+ static void
+ on_watch_fired (MetaDBusIdleMonitor *proxy,
+@@ -256,7 +256,7 @@
+ 	meta_dbus_object_manager_client_new (connection,
+ 					     G_DBUS_OBJECT_MANAGER_CLIENT_FLAGS_NONE,
+ 					     name_owner,
+-					     "/org/gnome/Mutter/IdleMonitor",
++					     "/org/honk/HWin/IdleMonitor",
+ 					     monitor->priv->cancellable,
+ 					     on_object_manager_ready,
+ 					     monitor);
+@@ -296,7 +296,7 @@
+ 	monitor = GNOME_IDLE_MONITOR (initable);
+ 
+ 	monitor->priv->name_watch_id = g_bus_watch_name (G_BUS_TYPE_SESSION,
+-							 "org.gnome.Mutter.IdleMonitor",
++							 "org.honk.HWin.IdleMonitor",
+ 							 G_BUS_NAME_WATCHER_FLAGS_NONE,
+ 							 on_name_appeared,
+ 							 on_name_vanished,
+--- a/libgnome-desktop/idle-monitor.xml
++++ b/libgnome-desktop/idle-monitor.xml
+@@ -3,14 +3,14 @@
+ 'http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd'>
+ <node>
+   <!--
+-      org.gnome.Mutter.IdleMonitor:
++      org.honk.HWin.IdleMonitor:
+       @short_description: idle monitor interface
+ 
+       This interface is used by gnome-desktop to implement
+       user activity monitoring.
+   -->
+ 
+-  <interface name="org.gnome.Mutter.IdleMonitor">
++  <interface name="org.honk.HWin.IdleMonitor">
+     <method name="GetIdletime">
+       <arg name="idletime" direction="out" type="t"/>
+     </method>
+--- a/libgnome-desktop/meson.build
++++ b/libgnome-desktop/meson.build
+@@ -45,13 +45,13 @@
+ dbus_xrandr_built_sources = gnome.gdbus_codegen('meta-dbus-xrandr',
+   'xrandr.xml',
+   namespace: 'MetaDBus',
+-  interface_prefix: 'org.gnome.Mutter'
++  interface_prefix: 'org.honk.HWin'
+ )
+ 
+ dbus_idle_built_sources = gnome.gdbus_codegen('meta-dbus-idle-monitor',
+   'idle-monitor.xml',
+   namespace: 'MetaDBus',
+-  interface_prefix: 'org.gnome.Mutter',
++  interface_prefix: 'org.honk.HWin',
+   object_manager: true
+ )
+ 
+--- a/libgnome-desktop/xrandr.xml
++++ b/libgnome-desktop/xrandr.xml
+@@ -3,14 +3,14 @@
+ 'http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd'>
+ <node>
+   <!--
+-      org.gnome.Mutter.DisplayConfig:
++      org.honk.HWin.DisplayConfig:
+       @short_description: display configuration interface
+ 
+       This interface is used by mutter and gnome-settings-daemon
+       to apply multiple monitor configuration.
+   -->
+ 
+-  <interface name="org.gnome.Mutter.DisplayConfig">
++  <interface name="org.honk.HWin.DisplayConfig">
+ 
+     <!--
+         GetResources:

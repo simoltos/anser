@@ -1,0 +1,930 @@
+--- a/build-aux/flatpak/org.gnome.Nautilus.json
++++ b/build-aux/flatpak/org.gnome.Nautilus.json
+@@ -26,9 +26,9 @@
+     "--talk-name=org.gnome.NautilusPreviewer",
+     "--talk-name=org.gnome.NautilusPreviewer.Devel",
+     "--talk-name=org.gnome.DiskUtility",
+-    "--talk-name=org.gnome.Settings",
++    "--talk-name=org.honk.Settings",
+     "--talk-name=org.gnome.Console",
+-    "--talk-name=org.gnome.Mutter.ServiceChannel",
++    "--talk-name=org.honk.HWin.ServiceChannel",
+     "--env=DCONF_USER_CONFIG_DIR=.config/dconf",
+     "--add-policy=LocalSearch3.dbus:org.freedesktop.Tracker3.Miner.Files=tracker:Audio",
+     "--add-policy=LocalSearch3.dbus:org.freedesktop.Tracker3.Miner.Files=tracker:Documents",
+--- a/src/nautilus-dbus-launcher.c
++++ b/src/nautilus-dbus-launcher.c
+@@ -277,7 +277,7 @@
+                               self->cancellable, proxy_ready, self);
+
+     nautilus_dbus_launcher_create_proxy (self->data[NAUTILUS_DBUS_LAUNCHER_SETTINGS],
+-                                         "org.gnome.Settings", "/org/gnome/Settings",
++                                         "org.honk.Settings", "/org/honk/Settings",
+                                          "org.gtk.Actions");
+
+     nautilus_dbus_launcher_create_proxy (self->data[NAUTILUS_DBUS_LAUNCHER_DISKS],
+--- a/subprojects/libgxdp/data/mutter-x11-interop.xml
++++ b/subprojects/libgxdp/data/mutter-x11-interop.xml
+@@ -1,11 +1,11 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+-<protocol name="mutter_x11_interop">
++<protocol name="hwin_x11_interop">
+   <description summary="X11 interoperability helper">
+     This protocol is intended to be used by the portal backend to map Wayland
+     dialogs as modal dialogs on top of X11 windows.
+   </description>
+
+-  <interface name="mutter_x11_interop" version="1">
++  <interface name="hwin_x11_interop" version="1">
+     <description summary="X11 interoperability helper"/>
+
+     <request name="destroy" type="destructor"/>
+--- a/subprojects/libgxdp/data/org.gnome.Mutter.ServiceChannel.xml
++++ b/subprojects/libgxdp/data/org.gnome.Mutter.ServiceChannel.xml
+@@ -3,7 +3,7 @@
+ 'http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd'>
+ <node>
+
+-  <interface name="org.gnome.Mutter.ServiceChannel">
++  <interface name="org.honk.HWin.ServiceChannel">
+
+     <!--
+         ServiceClientTypes:
+--- a/subprojects/libgxdp/src/gxdp-wayland.c
++++ b/subprojects/libgxdp/src/gxdp-wayland.c
+@@ -27,7 +27,7 @@
+ #include "mutter-x11-interop-client-protocol.h"
+ #include "gxdp-dbus.h"
+
+-static struct mutter_x11_interop *x11_interop = NULL;
++static struct hwin_x11_interop *x11_interop = NULL;
+
+ static void
+ handle_registry_global (void               *user_data,
+@@ -36,12 +36,12 @@
+                         const char         *interface,
+                         uint32_t            version)
+ {
+-  struct mutter_x11_interop **x11_interop_ptr = user_data;
+-
+-  if (strcmp (interface, mutter_x11_interop_interface.name) == 0)
++  struct hwin_x11_interop **x11_interop_ptr = user_data;
++
++  if (strcmp (interface, hwin_x11_interop_interface.name) == 0)
+     {
+       *x11_interop_ptr = wl_registry_bind (registry, id,
+-                                           &mutter_x11_interop_interface, 1);
++                                           &hwin_x11_interop_interface, 1);
+     }
+ }
+
+@@ -227,19 +227,19 @@
+                    GError                **error)
+ {
+   g_autoptr(GError) local_error = NULL;
+-  g_autoptr(GxdpDBusMutterServiceChannel) proxy = NULL;
++  g_autoptr(GxdpDBusHWinServiceChannel) proxy = NULL;
+   g_autoptr(GVariant) fd_variant = NULL;
+   g_autoptr(GUnixFDList) fd_list = NULL;
+   int fd;
+   g_autofree char *fd_str = NULL;
+
+-  proxy = gxdp_dbus_mutter_service_channel_proxy_new_for_bus_sync (
++  proxy = gxdp_dbus_hwin_service_channel_proxy_new_for_bus_sync (
+     G_BUS_TYPE_SESSION,
+     (G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START |
+      G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES |
+      G_DBUS_PROXY_FLAGS_DO_NOT_CONNECT_SIGNALS),
+-    "org.gnome.Mutter.ServiceChannel",
+-    "/org/gnome/Mutter/ServiceChannel",
++    "org.honk.HWin.ServiceChannel",
++    "/org/honk/HWin/ServiceChannel",
+     NULL, &local_error);
+   if (!proxy)
+     {
+@@ -249,7 +249,7 @@
+       return init_gtk_wayland_fallback (error);
+     }
+
+-  if (!gxdp_dbus_mutter_service_channel_call_open_wayland_service_connection_sync (
++  if (!gxdp_dbus_hwin_service_channel_call_open_wayland_service_connection_sync (
+         proxy,
+         service_client_type,
+         NULL,
+@@ -305,5 +305,5 @@
+   g_return_if_fail (dialog_surface);
+
+   wl_surface = gdk_wayland_surface_get_wl_surface (dialog_surface);
+-  mutter_x11_interop_set_x11_parent (x11_interop, wl_surface, parent_xid);
+-}
++  hwin_x11_interop_set_x11_parent (x11_interop, wl_surface, parent_xid);
++}
+--- a/subprojects/libgxdp/src/meson.build
++++ b/subprojects/libgxdp/src/meson.build
+@@ -52,7 +52,7 @@
+       'gxdp-dbus',
+       sources: dbus_interfaces,
+       namespace: 'GxdpDBus',
+-      interface_prefix: 'org.gnome.',
++      interface_prefix: 'org.honk.',
+     )
+
+     built_sources += [client_header, protocol_code]
+--- a/src/nautilus-file-operations.c
++++ b/src/nautilus-file-operations.c
+@@ -93,6 +93,9 @@
+ {
+     CommonJob common;
+     gboolean is_move;
++    gboolean incomplete;
++    NautilusOpCallback result_callback;
++    gpointer result_callback_data;
+     GList *files;
+     GFile *destination;
+     GFile *fake_display_source;
+@@ -107,6 +110,9 @@
+     GList *files;
+     gboolean try_trash;
+     gboolean user_cancel;
++    gboolean success;
++    NautilusOpCallback result_callback;
++    gpointer result_callback_data;
+     NautilusDeleteCallback done_callback;
+     gpointer done_callback_data;
+ } DeleteJob;
+@@ -1861,6 +1867,11 @@
+         g_hash_table_unref (debuting_uris);
+     }
+
++    if (job->result_callback)
++    {
++        job->result_callback (job->success, job->result_callback_data);
++    }
++
+     finalize_common ((CommonJob *) job);
+
+     nautilus_file_changes_consume_changes ();
+@@ -1952,6 +1963,9 @@
+         /* User has skipped all files, report user cancel */
+         job->user_cancel = TRUE;
+     }
++
++    /* A partial or cancelled operation must not complete an external MOVE. */
++    job->success = !job->user_cancel && !job_aborted (common) && files_skipped == 0;
+ }
+
+ static DeleteJob *
+@@ -2061,6 +2075,28 @@
+                                     dbus_data,
+                                     TRUE,
+                                     done_callback, done_callback_data);
++}
++
++/* Unlike the legacy callback, this reports partial failures as failure too.
++ * The ordinary job still owns confirmation, progress reporting and undo. */
++void
++nautilus_file_operations_trash_with_result_async (GList                          *files,
++                                                 GtkWindow                      *parent_window,
++                                                 NautilusFileOperationsDBusData *dbus_data,
++                                                 NautilusOpCallback              result_callback,
++                                                 gpointer                        result_callback_data)
++{
++    DeleteJob *job;
++    GTask *task;
++
++    job = setup_delete_job (files, parent_window, dbus_data, TRUE, NULL, NULL);
++    job->result_callback = result_callback;
++    job->result_callback_data = result_callback_data;
++
++    task = g_task_new (NULL, NULL, delete_task_done, job);
++    g_task_set_task_data (task, job, NULL);
++    g_task_run_in_thread (task, trash_or_delete_internal);
++    g_object_unref (task);
+ }
+
+ void
+@@ -4237,6 +4273,7 @@
+                 {
+                     /* Skip: Do Nothing */
+                     local_skipped_file = TRUE;
++                    copy_job->incomplete = TRUE;
+                 }
+                 else
+                 {
+@@ -4344,6 +4381,7 @@
+
+         if (!g_file_delete (src, job->cancellable, &error))
+         {
++            copy_job->incomplete = TRUE;
+             if (job->skip_all_error)
+             {
+                 *skipped_file = TRUE;
+@@ -4590,6 +4628,7 @@
+
+     if (should_skip_file (job, src))
+     {
++        copy_job->incomplete = TRUE;
+         return FALSE;
+     }
+
+@@ -4617,6 +4656,7 @@
+         dest = get_target_file_from_source_display_name (copy_job, src, dest_dir);
+         if (dest == NULL)
+         {
++            copy_job->incomplete = TRUE;
+             return FALSE;
+         }
+     }
+@@ -4632,6 +4672,7 @@
+     {
+         if (job->skip_all_error)
+         {
++            copy_job->incomplete = TRUE;
+             return FALSE;
+         }
+
+@@ -4647,6 +4688,7 @@
+                           source_info->num_files,
+                           source_info->num_files > transfer_info->num_files);
+
++        copy_job->incomplete = TRUE;
+         return FALSE;
+     }
+
+@@ -4656,6 +4698,7 @@
+     {
+         if (job->skip_all_error)
+         {
++            copy_job->incomplete = TRUE;
+             return FALSE;
+         }
+
+@@ -4671,6 +4714,7 @@
+                           source_info->num_files,
+                           source_info->num_files > transfer_info->num_files);
+
++        copy_job->incomplete = TRUE;
+         return FALSE;
+     }
+
+@@ -4831,6 +4875,7 @@
+
+             if (job->skip_all_conflict)
+             {
++                copy_job->incomplete = TRUE;
+                 return FALSE;
+             }
+
+@@ -4898,6 +4943,7 @@
+                 {
+                     if (job->skip_all_error)
+                     {
++                        copy_job->incomplete = TRUE;
+                         return FALSE;
+                     }
+
+@@ -4931,6 +4977,7 @@
+                                       source_info->num_files,
+                                       TRUE);
+
++                    copy_job->incomplete = TRUE;
+                     return FALSE;
+                 }
+                 nautilus_file_changes_queue_file_removed (dest);
+@@ -4960,6 +5007,7 @@
+                 continue;
+             }
+
++            copy_job->incomplete |= skipped_file;
+             return !skipped_file;
+         }
+         /* Other error */
+@@ -4967,6 +5015,7 @@
+         {
+             if (job->skip_all_error)
+             {
++                copy_job->incomplete = TRUE;
+                 return FALSE;
+             }
+
+@@ -4989,6 +5038,7 @@
+     }
+
+     /* Either skipped or aborted, but same-same */
++    copy_job->incomplete = TRUE;
+     return FALSE;
+ }
+
+@@ -5067,9 +5117,28 @@
+                 report_copy_progress (job, source_info, transfer_info);
+             }
+         }
++        else
++        {
++            job->incomplete = TRUE;
++        }
+     }
+
+     g_free (dest_fs_type);
++}
++
++static void
++copy_move_report_result (CopyMoveJob *job)
++{
++    CommonJob *common = &job->common;
++
++    if (job->result_callback != NULL)
++    {
++        gboolean success = !job_aborted (common) && !job->incomplete &&
++                           !common->skip_all_error && !common->skip_all_conflict &&
++                           (common->skip_files == NULL || g_hash_table_size (common->skip_files) == 0) &&
++                           (common->skip_readdir_error == NULL || g_hash_table_size (common->skip_readdir_error) == 0);
++        job->result_callback (success, job->result_callback_data);
++    }
+ }
+
+ static void
+@@ -5086,6 +5155,8 @@
+                             !job_aborted ((CommonJob *) job),
+                             job->done_callback_data);
+     }
++
++    copy_move_report_result (job);
+
+     g_list_free_full (job->files, g_object_unref);
+     if (job->destination)
+@@ -5351,6 +5422,7 @@
+         dest = get_target_file_from_source_display_name (move_job, src, dest_dir);
+         if (dest == NULL)
+         {
++            move_job->incomplete = TRUE;
+             return;
+         }
+     }
+@@ -5367,6 +5439,7 @@
+     {
+         if (job->skip_all_error)
+         {
++            move_job->incomplete = TRUE;
+             return;
+         }
+
+@@ -5382,6 +5455,7 @@
+                           total,
+                           files_left > 1);
+
++        move_job->incomplete = TRUE;
+         return;
+     }
+
+@@ -5391,6 +5465,7 @@
+     {
+         if (job->skip_all_error)
+         {
++            move_job->incomplete = TRUE;
+             return;
+         }
+
+@@ -5406,6 +5481,7 @@
+                           total,
+                           files_left > 1);
+
++        move_job->incomplete = TRUE;
+         return;
+     }
+
+@@ -5495,6 +5571,7 @@
+
+             if (job->skip_all_conflict)
+             {
++                move_job->incomplete = TRUE;
+                 return;
+             }
+
+@@ -5551,6 +5628,7 @@
+                                                     dest,
+                                                     overwrite);
+             *fallback_files = g_list_prepend (*fallback_files, fallback);
++            return;
+         }
+         else if (!IS_IO_ERROR (error, CANCELLED))
+         {
+@@ -5558,6 +5636,7 @@
+
+             if (job->skip_all_error)
+             {
++                move_job->incomplete = TRUE;
+                 return;
+             }
+
+@@ -5578,6 +5657,7 @@
+
+         break;
+     }
++    move_job->incomplete = TRUE;
+ }
+
+ static void
+@@ -5681,6 +5761,8 @@
+                             !job_aborted ((CommonJob *) job),
+                             job->done_callback_data);
+     }
++
++    copy_move_report_result (job);
+
+     g_list_free_full (job->files, g_object_unref);
+     g_object_unref (job->destination);
+@@ -6472,6 +6554,56 @@
+     {
+         g_object_unref (dest);
+     }
++}
++
++void
++nautilus_file_operations_copy_move_with_result (GList                          *files,
++                                                GFile                          *target_dir,
++                                                gboolean                        move,
++                                                NautilusFileOperationsDBusData *dbus_data,
++                                                NautilusOpCallback              callback,
++                                                gpointer                        callback_data)
++{
++    CopyMoveJob *job;
++    g_autoptr (GTask) task = NULL;
++
++    if (files == NULL || target_dir == NULL ||
++        g_file_has_uri_scheme (target_dir, SCHEME_STARRED) ||
++        g_file_has_uri_scheme (target_dir, SCHEME_BURN))
++    {
++        callback (FALSE, callback_data);
++        return;
++    }
++    if (move && g_file_has_uri_scheme (target_dir, SCHEME_TRASH))
++    {
++        nautilus_file_operations_trash_with_result_async (files, NULL, dbus_data,
++                                                          callback, callback_data);
++        return;
++    }
++    if (move)
++    {
++        job = move_job_setup (files, target_dir, NULL, dbus_data, NULL, NULL);
++    }
++    else
++    {
++        g_autoptr (GFile) source_dir = g_file_get_parent (files->data);
++        job = copy_job_setup (files, target_dir, NULL, dbus_data, NULL, NULL);
++        if (source_dir != NULL && g_file_equal (source_dir, target_dir))
++        {
++            g_clear_object (&job->destination);
++            if (!nautilus_file_undo_manager_is_operating ())
++            {
++                job->common.undo_info = nautilus_file_undo_info_ext_new (NAUTILUS_FILE_UNDO_OP_DUPLICATE,
++                                                                         g_list_length (files), source_dir, source_dir);
++            }
++        }
++    }
++    job->result_callback = callback;
++    job->result_callback_data = callback_data;
++    task = g_task_new (NULL, job->common.cancellable,
++                       move ? move_task_done : copy_task_done, job);
++    g_task_set_task_data (task, job, NULL);
++    g_task_run_in_thread (task, move ? nautilus_file_operations_move : nautilus_file_operations_copy);
+ }
+
+ static void
+--- a/src/nautilus-file-operations.h
++++ b/src/nautilus-file-operations.h
+@@ -59,6 +59,12 @@
+                                            NautilusFileOperationsDBusData *dbus_data,
+                                            NautilusCopyCallback            done_callback,
+                                            gpointer                        done_callback_data);
++void nautilus_file_operations_copy_move_with_result (GList                          *files,
++                                                      GFile                          *target_dir,
++                                                      gboolean                        move,
++                                                      NautilusFileOperationsDBusData *dbus_data,
++                                                      NautilusOpCallback              callback,
++                                                      gpointer                        callback_data);
+ void nautilus_file_operations_empty_trash (GtkWidget                      *parent_view,
+                                            gboolean                        ask_confirmation,
+                                            NautilusFileOperationsDBusData *dbus_data);
+@@ -89,6 +95,11 @@
+                                                      NautilusFileOperationsDBusData *dbus_data,
+                                                      NautilusDeleteCallback          done_callback,
+                                                      gpointer                        done_callback_data);
++void nautilus_file_operations_trash_with_result_async (GList                          *files,
++                                                       GtkWindow                      *parent_window,
++                                                       NautilusFileOperationsDBusData *dbus_data,
++                                                       NautilusOpCallback              result_callback,
++                                                       gpointer                        result_callback_data);
+ void nautilus_file_operations_delete_async (GList                          *files,
+                                             GtkWindow                      *parent_window,
+                                             NautilusFileOperationsDBusData *dbus_data,
+--- a/src/nautilus-dbus-manager.c
++++ b/src/nautilus-dbus-manager.c
+@@ -246,6 +246,61 @@
+     return TRUE; /* invocation was handled */
+ }
+
++/* Honk's cooperative desktop finishes a drag only after the transfer job. */
++static void
++transfer_result_on_finished (gboolean success,
++                              gpointer callback_data)
++{
++    GDBusMethodInvocation *invocation = callback_data;
++
++    g_dbus_method_invocation_return_value (invocation, g_variant_new ("(b)", success));
++    g_object_unref (invocation);
++    g_application_release (g_application_get_default ());
++}
++
++static gboolean
++handle_transfer_with_result (GDBusMethodInvocation *invocation,
++                              const gchar          **sources,
++                              const gchar           *destination,
++                              GVariant              *platform_data,
++                              gboolean               move)
++{
++    g_autoptr (NautilusFileOperationsDBusData) dbus_data = NULL;
++    g_autolist (GFile) source_files = NULL;
++    g_autoptr (GFile) target_dir = g_file_new_for_uri (destination);
++
++    dbus_data = nautilus_file_operations_dbus_data_new (platform_data);
++    for (guint idx = 0; sources[idx] != NULL; idx++)
++    {
++        source_files = g_list_prepend (source_files, g_file_new_for_uri (sources[idx]));
++    }
++    g_application_hold (g_application_get_default ());
++    nautilus_file_operations_copy_move_with_result (source_files, target_dir, move, dbus_data,
++                                                    transfer_result_on_finished,
++                                                    g_object_ref (invocation));
++    return TRUE;
++}
++
++static gboolean
++handle_copy_uris_with_result (NautilusDBusFileOperations2 *object,
++                               GDBusMethodInvocation       *invocation,
++                               const gchar                **sources,
++                               const gchar                 *destination,
++                               GVariant                    *platform_data)
++{
++    return handle_transfer_with_result (invocation, sources, destination, platform_data, FALSE);
++}
++
++static gboolean
++handle_move_uris_with_result (NautilusDBusFileOperations2 *object,
++                               GDBusMethodInvocation       *invocation,
++                               const gchar                **sources,
++                               const gchar                 *destination,
++                               GVariant                    *platform_data)
++{
++    return handle_transfer_with_result (invocation, sources, destination, platform_data, TRUE);
++}
++
+ /* FIXME: Needs a callback for maintaining alive the application */
+ static void
+ handle_empty_trash_internal (gboolean                        ask_confirmation,
+@@ -311,6 +366,39 @@
+
+     nautilus_dbus_file_operations2_complete_trash_uris (object, invocation);
+     return TRUE; /* invocation was handled */
++}
++
++static void
++trash_result_on_finished (gboolean success,
++                          gpointer callback_data)
++{
++    GDBusMethodInvocation *invocation = callback_data;
++
++    g_dbus_method_invocation_return_value (invocation, g_variant_new ("(b)", success));
++    g_object_unref (invocation);
++    g_application_release (g_application_get_default ());
++}
++
++static gboolean
++handle_trash_uris_with_result (NautilusDBusFileOperations2 *object,
++                               GDBusMethodInvocation       *invocation,
++                               const gchar                **uris,
++                               GVariant                    *platform_data)
++{
++    g_autoptr (NautilusFileOperationsDBusData) dbus_data = NULL;
++    g_autolist (GFile) source_files = NULL;
++
++    dbus_data = nautilus_file_operations_dbus_data_new (platform_data);
++    for (guint idx = 0; uris[idx] != NULL; idx++)
++    {
++        source_files = g_list_prepend (source_files, g_file_new_for_uri (uris[idx]));
++    }
++
++    g_application_hold (g_application_get_default ());
++    nautilus_file_operations_trash_with_result_async (source_files, NULL, dbus_data,
++                                                      trash_result_on_finished,
++                                                      g_object_ref (invocation));
++    return TRUE;
+ }
+
+ static void
+@@ -414,6 +502,14 @@
+     self->file_operations2 = nautilus_dbus_file_operations2_skeleton_new ();
+
+     g_signal_connect (self->file_operations2,
++                      "handle-copy-uris-with-result",
++                      G_CALLBACK (handle_copy_uris_with_result),
++                      self);
++    g_signal_connect (self->file_operations2,
++                      "handle-move-uris-with-result",
++                      G_CALLBACK (handle_move_uris_with_result),
++                      self);
++    g_signal_connect (self->file_operations2,
+                       "handle-copy-uris",
+                       G_CALLBACK (handle_copy_uris2),
+                       self);
+@@ -428,6 +524,10 @@
+     g_signal_connect (self->file_operations2,
+                       "handle-trash-uris",
+                       G_CALLBACK (handle_trash_uris2),
++                      self);
++    g_signal_connect (self->file_operations2,
++                      "handle-trash-uris-with-result",
++                      G_CALLBACK (handle_trash_uris_with_result),
+                       self);
+     g_signal_connect (self->file_operations2,
+                       "handle-delete-uris",
+--- a/data/dbus-interfaces2.xml
++++ b/data/dbus-interfaces2.xml
+@@ -39,6 +39,19 @@
+ <node xmlns:doc="http://www.freedesktop.org/dbus/1.0/doc.dtd">
+   <interface name='org.gnome.Nautilus.FileOperations2'>
+
++    <!-- Honk desktop transfers report completion rather than queueing. -->
++    <method name='CopyURIsWithResult'>
++      <arg type='as' name='sources' direction='in'/>
++      <arg type='s' name='destination' direction='in'/>
++      <arg type='a{sv}' name='platform_data' direction='in'/>
++      <arg type='b' name='success' direction='out'/>
++    </method>
++    <method name='MoveURIsWithResult'>
++      <arg type='as' name='sources' direction='in'/>
++      <arg type='s' name='destination' direction='in'/>
++      <arg type='a{sv}' name='platform_data' direction='in'/>
++      <arg type='b' name='success' direction='out'/>
++    </method>
+     <method name='CopyURIs'>
+       <arg type='as' name='sources' direction='in'/>
+       <arg type='s' name='destination' direction='in'/>
+@@ -56,6 +69,12 @@
+     <method name='TrashURIs'>
+       <arg type='as' name='uris' direction='in'/>
+       <arg type='a{sv}' name='platform_data' direction='in'/>
++    </method>
++    <!-- Honk desktop drops need actual completion, including skipped files. -->
++    <method name='TrashURIsWithResult'>
++      <arg type='as' name='uris' direction='in'/>
++      <arg type='a{sv}' name='platform_data' direction='in'/>
++      <arg type='b' name='success' direction='out'/>
+     </method>
+     <method name='DeleteURIs'>
+       <arg type='as' name='uris' direction='in'/>
+--- a/data/org.gnome.Nautilus.metainfo.xml.in.in
++++ b/data/org.gnome.Nautilus.metainfo.xml.in.in
+@@ -20,7 +20,6 @@
+   <url type="bugtracker">https://gitlab.gnome.org/GNOME/nautilus/issues</url>
+   <url type="contact">https://discourse.gnome.org/tag/nautilus</url>
+   <url type="contribute">https://welcome.gnome.org/app/Nautilus/</url>
+-  <url type="donation">https://www.gnome.org/donate/</url>
+   <url type="help">https://help.gnome.org/users/gnome-help/stable/files.html.en</url>
+   <url type="homepage">https://apps.gnome.org/Nautilus/</url>
+   <url type="translate">https://l10n.gnome.org/module/nautilus/</url>
+--- a/test/displayless/test-file-operations-trash-or-delete.c
++++ b/test/displayless/test-file-operations-trash-or-delete.c
+@@ -444,9 +444,78 @@
+     empty_directory_by_prefix (root, "trash_or_delete");
+ }
+
++typedef struct
++{
++    GMainLoop *loop;
++    GFile *file;
++    gboolean called;
++    gboolean success;
++} TrashResult;
++
++static void
++trash_result_finished (gboolean success,
++                       gpointer user_data)
++{
++    TrashResult *result = user_data;
++
++    result->called = TRUE;
++    result->success = success;
++    if (result->file != NULL)
++    {
++        /* The result must describe completed filesystem work, not queuing. */
++        g_assert_false (g_file_query_exists (result->file, NULL));
++    }
++    g_main_loop_quit (result->loop);
++}
++
++static void
++test_trash_with_result (void)
++{
++    g_autoptr (GFile) root = NULL;
++    g_autoptr (GFile) directory = NULL;
++    g_autoptr (GFile) file = NULL;
++    g_autolist (GFile) files = NULL;
++    g_autoptr (GMainLoop) loop = g_main_loop_new (NULL, FALSE);
++    TrashResult result = { .loop = loop };
++
++    create_one_file ("trash_result");
++    root = g_file_new_for_path (test_get_tmp_dir ());
++    directory = g_file_get_child (root, "trash_result_first_dir");
++    file = g_file_get_child (directory, "trash_result_first_dir_child");
++    g_assert_true (g_file_query_exists (file, NULL));
++    files = g_list_prepend (files, g_object_ref (file));
++    result.file = file;
++
++    nautilus_file_operations_trash_with_result_async (files, NULL, NULL,
++                                                      trash_result_finished, &result);
++    g_assert_false (result.called);
++    g_main_loop_run (loop);
++    g_assert_true (result.called);
++    g_assert_true (result.success);
++    g_assert_cmpint (nautilus_file_undo_manager_get_state (), ==,
++                     NAUTILUS_FILE_UNDO_MANAGER_STATE_UNDO);
++    empty_directory_by_prefix (root, "trash_result");
++}
++
++static void
++test_trash_with_result_empty (void)
++{
++    g_autoptr (GMainLoop) loop = g_main_loop_new (NULL, FALSE);
++    TrashResult result = { .loop = loop };
++
++    nautilus_file_operations_trash_with_result_async (NULL, NULL, NULL,
++                                                      trash_result_finished, &result);
++    g_main_loop_run (loop);
++    g_assert_true (result.called);
++    g_assert_false (result.success);
++}
++
+ static void
+ setup_test_suite (void)
+ {
++    g_test_add_func ("/trash/result/completed", test_trash_with_result);
++    g_test_add_func ("/trash/result/empty", test_trash_with_result_empty);
++
+     g_test_add_func ("/trash/one-file/1.0",
+                      test_trash_one_file);
+     g_test_add_func ("/trash/more-files/1.0",
+--- a/test/display/meson.build
++++ b/test/display/meson.build
+@@ -1,6 +1,7 @@
+ tests = {
+   'test-nautilus-directory-async': {},
+   'test-file-operations-create': {},
++  'test-file-operations-transfer-result': {},
+   'test-files-view': {
+     'suite': ['tracker'],
+     'tracker': true,
+--- /dev/null
++++ b/test/display/test-file-operations-transfer-result.c
+@@ -0,0 +1,141 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#include "test-utilities.h"
++#include <nautilus-file-conflict-dialog.h>
++#include <nautilus-file-operations.h>
++#include <nautilus-file-undo-manager.h>
++#include <nautilus-file-utilities.h>
++#include <nautilus-global-preferences.h>
++#include <nautilus-image.h>
++#include <nautilus-resources.h>
++#include <nautilus-tag-manager.h>
++
++typedef struct
++{
++    GMainLoop *loop;
++    gboolean called;
++    gboolean success;
++    guint dialogs;
++} TransferResult;
++
++static void
++transfer_finished (gboolean success,
++                    gpointer user_data)
++{
++    TransferResult *result = user_data;
++    result->called = TRUE;
++    result->success = success;
++    g_main_loop_quit (result->loop);
++}
++
++static gboolean
++answer_conflicts (gpointer user_data)
++{
++    TransferResult *result = user_data;
++    GListModel *windows = gtk_window_get_toplevels ();
++
++    for (guint i = 0; i < g_list_model_get_n_items (windows); i++)
++    {
++        g_autoptr (GtkWindow) window = g_list_model_get_item (windows, i);
++        if (NAUTILUS_IS_FILE_CONFLICT_DIALOG (window) && gtk_widget_get_visible (GTK_WIDGET (window)))
++        {
++            /* Merge the outer and nested directories, then skip one child. */
++            const char *name = result->dialogs < 2 ? "replace_button" : "skip_button";
++            GObject *button = gtk_widget_get_template_child (GTK_WIDGET (window),
++                                                            NAUTILUS_TYPE_FILE_CONFLICT_DIALOG, name);
++            if (gtk_widget_get_sensitive (GTK_WIDGET (button)))
++            {
++                result->dialogs++;
++                g_signal_emit_by_name (button, "clicked");
++                break;
++            }
++        }
++    }
++    return G_SOURCE_CONTINUE;
++}
++
++static gboolean
++timed_out (gpointer user_data)
++{
++    g_error ("Transfer completion or conflict response did not finish");
++    return G_SOURCE_REMOVE;
++}
++
++static void
++test_completed_transfer (gconstpointer data)
++{
++    gboolean move = GPOINTER_TO_INT (data);
++    g_autoptr (GFile) source = g_file_new_build_filename (test_get_tmp_dir (), "result-source", NULL);
++    g_autoptr (GFile) target = g_file_new_build_filename (test_get_tmp_dir (), "result-target", NULL);
++    g_autoptr (GFile) destination = g_file_get_child (target, "result-source");
++    g_autoptr (GMainLoop) loop = g_main_loop_new (NULL, FALSE);
++    TransferResult result = { .loop = loop };
++
++    g_assert_true (g_file_replace_contents (source, "payload", 7, NULL, FALSE, 0, NULL, NULL, NULL));
++    g_assert_true (g_file_make_directory (target, NULL, NULL));
++    guint timeout = g_timeout_add_seconds (20, timed_out, NULL);
++    nautilus_file_operations_copy_move_with_result (&(GList){ .data = source }, target,
++                                                    move, NULL, transfer_finished, &result);
++    g_main_loop_run (loop);
++    g_source_remove (timeout);
++    g_assert_true (result.called);
++    g_assert_true (result.success);
++    g_assert_true (g_file_query_exists (destination, NULL));
++    g_assert_cmpint (g_file_query_exists (source, NULL), ==, !move);
++    test_clear_tmp_dir ();
++}
++
++static void
++test_merged_copy_skips_descendant (void)
++{
++    const GStrv hierarchy = (char *[]){
++        "result-source/", "result-source/bundle/", "result-source/bundle/nested/",
++        "result-source/bundle/nested/conflict.txt", "result-source/bundle/nested/copied.txt",
++        "result-target/", "result-target/bundle/", "result-target/bundle/nested/",
++        "result-target/bundle/nested/conflict.txt", NULL,
++    };
++    g_autoptr (GFile) source = g_file_new_build_filename (test_get_tmp_dir (), "result-source", "bundle", NULL);
++    g_autoptr (GFile) target = g_file_new_build_filename (test_get_tmp_dir (), "result-target", NULL);
++    g_autoptr (GFile) copied = g_file_get_child (target, "bundle/nested/copied.txt");
++    g_autoptr (GFile) original = g_file_get_child (source, "nested/conflict.txt");
++    g_autoptr (GFile) conflict = g_file_get_child (target, "bundle/nested/conflict.txt");
++    g_autoptr (GMainLoop) loop = g_main_loop_new (NULL, FALSE);
++    g_autofree char *contents = NULL;
++    TransferResult result = { .loop = loop };
++
++    file_hierarchy_create (hierarchy, "");
++    g_assert_true (g_file_replace_contents (conflict, "keep existing", 13, NULL, FALSE, 0, NULL, NULL, NULL));
++    guint answers = g_timeout_add (10, answer_conflicts, &result);
++    guint timeout = g_timeout_add_seconds (20, timed_out, NULL);
++    nautilus_file_operations_copy_move_with_result (&(GList){ .data = source }, target,
++                                                    FALSE, NULL, transfer_finished, &result);
++    g_main_loop_run (loop);
++    g_source_remove (answers);
++    g_source_remove (timeout);
++    g_assert_true (result.called);
++    g_assert_false (result.success);
++    g_assert_cmpuint (result.dialogs, ==, 3);
++    g_assert_true (g_file_query_exists (copied, NULL));
++    g_assert_true (g_file_query_exists (original, NULL));
++    g_assert_true (g_file_load_contents (conflict, NULL, &contents, NULL, NULL, NULL));
++    g_assert_cmpstr (contents, ==, "keep existing");
++    test_clear_tmp_dir ();
++}
++
++int
++main (int argc, char **argv)
++{
++    gtk_test_init (&argc, &argv, NULL);
++    adw_init ();
++    nautilus_register_resource ();
++    nautilus_global_preferences_init ();
++    // The conflict template contains NautilusImage; its class needs preferences.
++    g_type_ensure (NAUTILUS_TYPE_IMAGE);
++    test_init_config_dir ();
++    nautilus_ensure_extension_points ();
++    g_autoptr (NautilusFileUndoManager) undo_manager = nautilus_file_undo_manager_new ();
++    g_autoptr (NautilusTagManager) tag_manager = nautilus_tag_manager_new_dummy ();
++    g_test_add_data_func ("/transfer-result/copy-completed", GINT_TO_POINTER (FALSE), test_completed_transfer);
++    g_test_add_data_func ("/transfer-result/move-completed", GINT_TO_POINTER (TRUE), test_completed_transfer);
++    g_test_add_func ("/transfer-result/merged-copy-skipped-descendant", test_merged_copy_skips_descendant);
++    return g_test_run ();
++}

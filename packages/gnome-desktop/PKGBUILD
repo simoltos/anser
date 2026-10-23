@@ -1,0 +1,145 @@
+# Adapted from the Arch Linux packaging recipe for the Honk integration.
+# shellcheck shell=bash
+# shellcheck disable=SC2034,SC2154
+# Patch source: https://github.com/simoltos/honk/tree/2e1041b240256c733481f3732b3b790a1b2203d9/shell/data/compatibility
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+# Maintainer: Fabian Bornschein <fabiscafe@archlinux.org>
+# Contributor: Jan de Groot <jan@archlinux.org>
+
+pkgbase=gnome-desktop
+pkgname=(
+  gnome-desktop-common
+  gnome-desktop
+  gnome-desktop-4
+  gnome-desktop-docs
+)
+pkgver=51.0
+pkgrel=5
+epoch=1
+pkgdesc="Provides API shared by several apps on the GNOME desktop"
+url="https://gitlab.gnome.org/GNOME/gnome-desktop"
+arch=(x86_64)
+license=(
+  GPL-2.0-or-later
+  LGPL-2.0-or-later
+)
+depends=(
+  bubblewrap
+  cairo
+  gdk-pixbuf2
+  glib2
+  glibc
+  gsettings-desktop-schemas
+  iso-codes
+  libgcc
+  libseccomp
+  libxkbcommon
+  systemd-libs
+  xkeyboard-config
+)
+makedepends=(
+  git
+  glib2-devel
+  gobject-introspection
+  gtk-doc
+  gtk3
+  gtk4
+  meson
+  systemd
+  yelp-tools
+)
+checkdepends=(xorg-server-xvfb)
+source=(
+  'gnome-desktop-51.0.tar.xz::https://download.gnome.org/sources/gnome-desktop/51/gnome-desktop-51.0.tar.xz'
+  'gnome-desktop-51.0.patch'
+)
+sha256sums=(
+  '9ebeb9f1769d3c310caeadd921ab34c8f264b92937740518b3bc859a579a6912'
+  'ed9200f33304dded1234aeb81d98ed913837240f16a72e1dd194b8b7ee2c0cd6'
+)
+
+prepare() {
+  patch -d "$srcdir/gnome-desktop-51.0" -Np1 -i "$srcdir/gnome-desktop-51.0.patch"
+}
+
+build() {
+  local meson_options=(
+    -D debug_tools=false
+    -D gtk_doc=true
+  )
+
+  # Inject subprojects
+  export MESON_WRAP_MODE=nodownload
+
+  arch-meson "$srcdir/gnome-desktop-51.0" build "${meson_options[@]}"
+  meson compile -C build
+}
+
+check() {
+  dbus-run-session xvfb-run -s '-nolisten local' \
+    meson test -C build --print-errorlogs
+}
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#"$pkgdir"/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_gnome-desktop-common() {
+  pkgdesc+=" (common files)"
+  depends=()
+
+  meson install -C build --no-rebuild --destdir "$pkgdir"
+
+  cd "$pkgdir" || return
+
+  _pick gtk3 usr/include/gnome-desktop-3.0
+  _pick gtk3 usr/lib/libgnome-desktop-3.so*
+  _pick gtk3 usr/lib/pkgconfig/gnome-desktop-3.0.pc
+  _pick gtk3 usr/lib/girepository-1.0/GnomeDesktop-3.0.typelib
+  _pick gtk3 usr/share/gir-1.0/GnomeDesktop-3.0.gir
+
+  _pick gtk4 usr/include/gnome-desktop-4.0
+  _pick gtk4 usr/lib/libgnome-*-4.so*
+  _pick gtk4 usr/lib/pkgconfig/gnome-*-4.pc
+  _pick gtk4 usr/lib/girepository-1.0/Gnome*-4.0.typelib
+  _pick gtk4 usr/share/gir-1.0/Gnome*-4.0.gir
+
+  _pick docs usr/share/gtk-doc
+}
+
+package_gnome-desktop() {
+  pkgdesc+=" using GTK 3"
+  depends+=(
+    "gnome-desktop-common=$epoch:$pkgver-$pkgrel"
+    gtk3
+  )
+  provides=(libgnome-desktop-3.so)
+
+  mv gtk3/* "$pkgdir"
+}
+
+package_gnome-desktop-4() {
+  pkgdesc+=" using GTK 4"
+  depends+=(
+    "gnome-desktop-common=$epoch:$pkgver-$pkgrel"
+    gtk4
+  )
+  provides=(libgnome-{bg,desktop,qr,qr-gtk}-4.so honk-desktop-51)
+
+  mv gtk4/* "$pkgdir"
+}
+
+package_gnome-desktop-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  mv docs/* "$pkgdir"
+}
+
+# vim:set sw=2 sts=-1 et:

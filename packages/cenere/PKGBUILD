@@ -1,0 +1,38 @@
+# shellcheck shell=bash
+# Anser packaging; the source and supplied MIT license belong to Cenere.
+# shellcheck disable=SC2034,SC2154
+pkgname=cenere
+pkgver=0.r2.gaaa5a6417593
+pkgrel=1
+pkgdesc='Guided offline installer for Arch Linux and derivatives'
+arch=('x86_64')
+url='https://github.com/simoltos/cenere'
+license=('MIT')
+_commit=aaa5a6417593d778a9aabb7c335c72a76b2153df
+depends=('arch-install-scripts' 'btrfs-progs' 'bash' 'coreutils' 'cryptsetup' 'dosfstools'
+         'e2fsprogs' 'efibootmgr' 'glibc' 'grub' 'json-c' 'kbd' 'mkinitcpio'
+         'ntfs-3g' 'ntfsprogs' 'os-prober' 'pacman' 'rsync' 'shadow' 'systemd' 'tzdata' 'util-linux' 'xkeyboard-config')
+checkdepends=('bubblewrap' 'python')
+source=("$pkgname-$_commit.tar.gz::https://codeload.github.com/simoltos/cenere/tar.gz/$_commit")
+sha256sums=('5491ecf4c03f5805512fccdca5d1753bd106515cd7343a4599138770bdaa15d4')
+
+prepare() {
+    printf '{\n  "package": "%s",\n  "version": "%s",\n  "git_revision": "%s",\n  "working_tree_modified": false,\n  "source_archive_sha256": "%s",\n  "source_project": "%s"\n}\n' \
+        "$pkgname" "$pkgver-$pkgrel" "$_commit" "${sha256sums[0]}" "$pkgname" \
+        > "$srcdir/source.json"
+}
+
+build() {
+    make -C "$srcdir/$pkgname-$_commit" CC="${CC:-cc}" CPPFLAGS="${CPPFLAGS:-}" \
+        CFLAGS="$CFLAGS -std=c11 -Wall -Wextra -Wpedantic" LDFLAGS="$LDFLAGS"
+}
+
+check() {
+    make -C "$srcdir/$pkgname-$_commit" test
+}
+
+package() {
+    install -Dm755 "$srcdir/$pkgname-$_commit/cenere" "$pkgdir/usr/bin/cenere"
+    install -Dm644 "$srcdir/source.json" "$pkgdir/usr/share/cenere/source.json"
+    install -Dm644 "$srcdir/$pkgname-$_commit/LICENSE" "$pkgdir/usr/share/licenses/cenere/LICENSE"
+}

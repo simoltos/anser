@@ -1,0 +1,93 @@
+# Adapted from the Arch Linux packaging recipe for the Honk integration.
+# shellcheck shell=bash
+# shellcheck disable=SC2034,SC2154
+# Patch source: https://github.com/simoltos/honk/tree/2e1041b240256c733481f3732b3b790a1b2203d9/shell/data/compatibility
+# Rebased onto GNOME Settings Daemon 51.1; upstream translation updates retained.
+# Maintainer: Fabian Bornschein <fabiscafe@archlinux.org>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+pkgname=gnome-settings-daemon
+pkgver=51.1
+pkgrel=2
+pkgdesc="GNOME Settings Daemon"
+url="https://gitlab.gnome.org/GNOME/gnome-settings-daemon"
+arch=(x86_64)
+license=(
+  GPL-2.0-or-later
+  LGPL-2.0-or-later
+)
+depends=(
+  alsa-lib
+  bash
+  dconf
+  fontconfig
+  gcr-4
+  geoclue
+  geocode-glib-2
+  glib2
+  glibc
+  gnome-desktop-4
+  gsettings-desktop-schemas
+  gtk4
+  libcanberra-pulse
+  libcolord
+  libcups
+  libgcc
+  libgudev
+  libgweather-4
+  libmm-glib
+  libnm
+  libnotify
+  libp11-kit
+  libpulse
+  libx11
+  libxfixes
+  polkit
+  pulse-native-provider
+  systemd-libs
+  upower
+)
+makedepends=(
+  docbook-xsl
+  git
+  glib2-devel
+  libxslt
+  meson
+  python
+  usbguard
+)
+checkdepends=(
+  python-dbusmock
+  python-gobject
+)
+optdepends=('usbguard: USB protection support')
+provides=(honk-settings-daemon-51)
+groups=(gnome)
+backup=(etc/xdg/Xwayland-session.d/00-xrdb)
+source=(
+  'gnome-settings-daemon-51.1.tar.xz::https://download.gnome.org/sources/gnome-settings-daemon/51/gnome-settings-daemon-51.1.tar.xz'
+  'gnome-settings-daemon-51.1.patch'
+)
+sha256sums=(
+  'e7de8d30ae2d63c7a9a21f8f0247219275cbc1d7f5ed09205e4a47642666f6ae'
+  'd41c6fc51410d29771d4b856f5143949bea7b61ce758cb4b65e39df98de3679b'
+)
+
+prepare() {
+  patch -d "$srcdir/gnome-settings-daemon-51.1" -Np1 -i "$srcdir/gnome-settings-daemon-51.1.patch"
+}
+
+build() {
+  arch-meson "$srcdir/gnome-settings-daemon-51.1" build
+  meson compile -C build
+}
+
+check() {
+  meson test -C build --print-errorlogs
+}
+
+package() {
+  meson install -C build --no-rebuild --destdir "$pkgdir"
+}
+
+# vim:set sw=2 sts=-1 et:

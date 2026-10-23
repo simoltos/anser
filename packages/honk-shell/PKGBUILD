@@ -1,0 +1,145 @@
+# shellcheck shell=bash
+# Independent component built from one pinned Honk commit.
+# shellcheck disable=SC2034,SC2154
+_commit=2e1041b240256c733481f3732b3b790a1b2203d9
+pkgname=honk-shell
+# The public Git history replaces the former private snapshot history.
+epoch=2
+pkgver=r8.g2e1041b24025
+pkgrel=1
+pkgdesc='Honk desktop shell'
+arch=('x86_64')
+url='https://github.com/simoltos/honk'
+groups=('honk')
+license=('GPL-2.0-or-later' 'GPL-3.0-only' 'LGPL-2.1-or-later' 'CC-BY-SA-4.0')
+depends=(
+    "hwin=$epoch:$pkgver"
+    'accountsservice'
+    'at-spi2-core'
+    'bash'
+    'cairo'
+    'dconf'
+    'evolution-data-server'
+    'gcr-4'
+    'gdk-pixbuf2'
+    'gjs>=2:1.87.1'
+    'glib2>=2.86.0'
+    'glibc'
+    'glycin>=2.0'
+    'gnome-autoar'
+    'gnome-bluetooth-3.0'
+    'gnome-desktop-4'
+    'gnome-session'
+    'gnome-settings-daemon'
+    'graphene'
+    'gsettings-desktop-schemas>=51.rc'
+    'gtk4'
+    'gvfs'
+    'hicolor-icon-theme'
+    'ibus'
+    'json-glib'
+    'libadwaita'
+    'libcanberra-pulse'
+    'libgcc'
+    'libgdm'
+    'libglvnd'
+    'libgweather-4'
+    'libibus'
+    'libical'
+    'libnm'
+    'libnma-gtk4'
+    'libpipewire>=1:1.6.0'
+    'libpulse'
+    'librsvg'
+    'libsecret'
+    'libsoup3'
+    'libx11'
+    'libxext'
+    'libxfixes'
+    'libxml2>=2.13.0'
+    'pango'
+    'polkit'
+    'python-gobject'
+    'systemd-libs'
+    'unzip'
+    'upower'
+    'webkitgtk-6.0'
+    'gst-plugin-pipewire'
+    'gst-plugins-good'
+    'honk-session-51'
+    'honk-desktop-51'
+    'honk-settings-daemon-51'
+    'honk-portal-51'
+    'honk-nautilus-51'
+    'nautilus>=51.1-4'
+)
+makedepends=(
+    'git'
+    'glib2-devel'
+    'gobject-introspection'
+    'meson'
+    'ninja'
+    'pkgconf'
+    'bash-completion'
+    'sassc'
+    'systemd'
+)
+provides=(
+    'gnome-shell=1:51.0'
+)
+conflicts=(
+    'honk'
+    'gnome-tiling'
+    'gnome-shell'
+)
+replaces=(
+    'honk'
+    'gnome-tiling'
+)
+source=(
+    "honk-$_commit.tar.gz::https://codeload.github.com/simoltos/honk/tar.gz/$_commit"
+    'https://gitlab.gnome.org/GNOME/libgnome-volume-control/-/archive/0a4eda0cdc2deb352bebc70ec697c42af46094e4/libgnome-volume-control-0a4eda0cdc2deb352bebc70ec697c42af46094e4.tar.gz'
+    'https://gitlab.gnome.org/GNOME/libshew/-/archive/d16afc40412b565d2bbecf80335f54a19a978009/libshew-d16afc40412b565d2bbecf80335f54a19a978009.tar.gz'
+)
+sha256sums=(
+    '620e666bd9ca0640eb1b33afbd2dcc00474c15fcd07063e1d838ee0e51f5d131'
+    '39b3fb067d2e96a83a0750dc5e43d168febd79d01352560e06d4d3579d49926e'
+    'b460997ad73744df06117200205a0168b91dfef50e7076013a14110abb245a93'
+)
+
+prepare() {
+    printf '{\n  "package": "%s",\n  "version": "%s",\n  "git_revision": "%s",\n  "working_tree_modified": false,\n  "source_archive_sha256": "%s"\n}\n' \
+        "$pkgname" "$epoch:$pkgver-$pkgrel" "$_commit" "${sha256sums[0]}" > "$srcdir/source.json"
+    local tree="$srcdir/honk-$_commit"
+    printf '%s\n' "$pkgver" > "$tree/SOURCE_VERSION"
+    if [[ ! -d $tree/shell/subprojects/gvc ]]; then
+        grep -Eq '^revision[[:space:]]*=[[:space:]]*0a4eda0cdc2deb352bebc70ec697c42af46094e4$' "$tree/shell/subprojects/gvc.wrap"
+        cp -a "$srcdir/libgnome-volume-control-0a4eda0cdc2deb352bebc70ec697c42af46094e4" "$tree/shell/subprojects/gvc"
+    fi
+    if [[ ! -d $tree/shell/subprojects/libshew ]]; then
+        grep -Eq '^revision[[:space:]]*=[[:space:]]*d16afc40412b565d2bbecf80335f54a19a978009$' "$tree/shell/subprojects/libshew.wrap"
+        cp -a "$srcdir/libshew-d16afc40412b565d2bbecf80335f54a19a978009" "$tree/shell/subprojects/libshew"
+    fi
+    patch -d "$tree/shell/subprojects/libshew" -p1 < "$tree/shell/subprojects/packagefiles/libshew-hwin.patch"
+}
+
+build() {
+    meson setup build "$srcdir/honk-$_commit/shell" \
+        --prefix=/usr --libdir=lib --libexecdir=lib --sysconfdir=/etc \
+        --localstatedir=/var --buildtype=release --wrap-mode=nodownload \
+        -Db_lto=true -Dwerror=false \
+        -Dtests=false -Dcamera_monitor=true -Dnetworkmanager=true -Dportal_helper=true -Dsystemd=true -Dextensions_tool=true
+    meson compile -C build -j3
+}
+
+package() {
+    local component notice
+    DESTDIR="$pkgdir" meson install -C build --no-rebuild
+    install -Dm644 "$srcdir/source.json" "$pkgdir/usr/share/$pkgname/source.json"
+    for component in shell shell/data/theme/honk-shell-sass shell/desktop-icons shell/subprojects/extensions-tool shell/subprojects/gvc shell/subprojects/libshew; do
+        for notice in "$srcdir/honk-$_commit/$component"/{COPYING,LICENSE}*; do
+            [[ -f $notice ]] || continue
+            install -Dm644 "$notice" "$pkgdir/usr/share/licenses/$pkgname/$component/${notice##*/}"
+        done
+    done
+}

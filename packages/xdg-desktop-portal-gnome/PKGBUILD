@@ -1,0 +1,72 @@
+# Adapted from the Arch Linux packaging recipe for the Honk integration.
+# shellcheck shell=bash
+# shellcheck disable=SC2034,SC2154
+# Patch source: https://github.com/simoltos/honk/tree/2e1041b240256c733481f3732b3b790a1b2203d9/shell/data/compatibility
+# Maintainer: Fabian Bornschein <fabiscafe@archlinux.org>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+pkgname=xdg-desktop-portal-gnome
+pkgver=51.0
+pkgrel=5
+pkgdesc="Backend implementation for xdg-desktop-portal for the GNOME desktop environment"
+url="https://gitlab.gnome.org/GNOME/xdg-desktop-portal-gnome"
+arch=(x86_64)
+license=(LGPL-2.1-or-later)
+depends=(
+  cairo
+  dconf
+  fontconfig
+  gdk-pixbuf2
+  glib2
+  glibc
+  gnome-desktop-4
+  graphene
+  gtk4
+  libadwaita
+  libgcc
+  libx11
+  nautilus
+  wayland
+  xdg-desktop-portal
+  'xdg-desktop-portal-gtk>=1.10.0-2'
+)
+makedepends=(
+  git
+  glib2-devel
+  meson
+)
+optdepends=('evince: Print previews')
+provides=(xdg-desktop-portal-impl honk-portal-51)
+conflicts=('xdg-desktop-portal-gtk<1.10.0-2')
+replaces=('xdg-desktop-portal-gtk<1.10.0-2')
+groups=(gnome)
+source=(
+  'xdg-desktop-portal-gnome-51.0.tar.xz::https://download.gnome.org/sources/xdg-desktop-portal-gnome/51/xdg-desktop-portal-gnome-51.0.tar.xz'
+  'xdg-desktop-portal-gnome-51.0.patch'
+)
+sha256sums=(
+  'ec228b305091b649c16c690e102aa1d66fc10e9834888d51e411913c82c1430d'
+  '25ffec1683a1e22730ecebac4bf5e5cc5851c96bcc9ace96155635e9c4a01bb2'
+)
+
+prepare() {
+  patch -d "$srcdir/xdg-desktop-portal-gnome-51.0" -Np1 -i "$srcdir/xdg-desktop-portal-gnome-51.0.patch"
+}
+
+build() {
+  # Inject libgxdp
+  export MESON_WRAP_MODE=nodownload
+
+  arch-meson "$srcdir/xdg-desktop-portal-gnome-51.0" build
+  meson compile -C build
+}
+
+check() {
+  meson test -C build --print-errorlogs
+}
+
+package() {
+  meson install -C build --no-rebuild --destdir "$pkgdir"
+}
+
+# vim:set sw=2 sts=-1 et:

@@ -1,0 +1,136 @@
+# shellcheck shell=bash
+# Independent component built from one pinned Honk commit.
+# shellcheck disable=SC2034,SC2154
+_commit=2e1041b240256c733481f3732b3b790a1b2203d9
+pkgname=honk-settings
+# The public Git history replaces the former private snapshot history.
+epoch=2
+pkgver=r8.g2e1041b24025
+pkgrel=1
+pkgdesc='Honk desktop settings'
+arch=('x86_64')
+url='https://github.com/simoltos/honk'
+groups=('honk')
+license=('GPL-2.0-or-later' 'GPL-3.0-only' 'LGPL-2.1-or-later' 'CC-BY-SA-4.0')
+depends=(
+    "honk-shell=$epoch:$pkgver"
+    'accountsservice'
+    'bolt'
+    'cairo'
+    'colord-gtk4'
+    'cups-pk-helper'
+    'dconf'
+    'fontconfig'
+    'gcr-4'
+    'gdk-pixbuf2'
+    'glib2>=2.86.0'
+    'glibc'
+    'gnome-bluetooth-3.0'
+    'gnome-color-manager'
+    'gnome-desktop-4'
+    'gnome-online-accounts'
+    'gnome-settings-daemon'
+    'gnutls'
+    'graphene'
+    'gsettings-desktop-schemas>=51.rc'
+    'gsound'
+    'gst-plugins-good'
+    'gtk4'
+    'hicolor-icon-theme'
+    'ibus'
+    'json-glib'
+    'krb5'
+    'libadwaita'
+    'libcolord'
+    'libcups'
+    'libepoxy'
+    'libgcc'
+    'libgoa'
+    'libgtop'
+    'libgudev'
+    'libibus'
+    'libmm-glib'
+    'libnm'
+    'libnma-gtk4'
+    'libpolkit-gobject-1.so'
+    'libpulse'
+    'libpwquality'
+    'libsoup3'
+    'libxml2>=2.13.0'
+    'pango'
+    'polkit'
+    'smbclient'
+    'sound-theme-freedesktop'
+    'systemd-libs'
+    'tecla'
+    'udisks2'
+    'upower'
+    'honk-desktop-51'
+    'honk-settings-daemon-51'
+)
+makedepends=(
+    'git'
+    'glib2-devel'
+    'gobject-introspection'
+    'meson'
+    'ninja'
+    'pkgconf'
+    'blueprint-compiler'
+    'cups'
+    'sassc'
+)
+provides=(
+    'gnome-control-center=51.0'
+    'gnome-keybindings=51.0'
+)
+conflicts=(
+    'honk'
+    'gnome-tiling'
+    'gnome-control-center'
+    'gnome-keybindings'
+)
+replaces=(
+    'honk'
+    'gnome-tiling'
+)
+source=(
+    "honk-$_commit.tar.gz::https://codeload.github.com/simoltos/honk/tar.gz/$_commit"
+    'https://gitlab.gnome.org/GNOME/libgxdp/-/archive/df896e3412b749947bc6f62a91a1aac8e6b6d19b/libgxdp-df896e3412b749947bc6f62a91a1aac8e6b6d19b.tar.gz'
+)
+sha256sums=(
+    '620e666bd9ca0640eb1b33afbd2dcc00474c15fcd07063e1d838ee0e51f5d131'
+    '501f39e913c21c951ff8926f0056f846c2c738a66cce06d5b3637c9110f5a92d'
+)
+
+prepare() {
+    printf '{\n  "package": "%s",\n  "version": "%s",\n  "git_revision": "%s",\n  "working_tree_modified": false,\n  "source_archive_sha256": "%s"\n}\n' \
+        "$pkgname" "$epoch:$pkgver-$pkgrel" "$_commit" "${sha256sums[0]}" > "$srcdir/source.json"
+    local tree="$srcdir/honk-$_commit"
+    printf '%s\n' "$pkgver" > "$tree/SOURCE_VERSION"
+    if [[ ! -d $tree/settings/subprojects/libgxdp ]]; then
+        grep -Eq '^revision[[:space:]]*=[[:space:]]*df896e3412b749947bc6f62a91a1aac8e6b6d19b$' "$tree/settings/subprojects/libgxdp.wrap"
+        cp -a "$srcdir/libgxdp-df896e3412b749947bc6f62a91a1aac8e6b6d19b" "$tree/settings/subprojects/libgxdp"
+    fi
+    patch -d "$tree/settings/subprojects/libgxdp" -p1 < "$tree/settings/subprojects/packagefiles/libgxdp-honk.patch"
+}
+
+build() {
+    meson setup build "$srcdir/honk-$_commit/settings" \
+        --prefix=/usr --libdir=lib --libexecdir=lib --sysconfdir=/etc \
+        --localstatedir=/var --buildtype=release --wrap-mode=nodownload \
+        -Db_lto=true -Dwerror=false \
+        -Dtests=false -Dprivileged_group=wheel
+    meson compile -C build -j3
+}
+
+package() {
+    local component notice
+    DESTDIR="$pkgdir" meson install -C build --no-rebuild
+    install -Dm644 "$srcdir/source.json" "$pkgdir/usr/share/$pkgname/source.json"
+    for component in settings settings/subprojects/gvc settings/subprojects/libgxdp; do
+        for notice in "$srcdir/honk-$_commit/$component"/{COPYING,LICENSE}*; do
+            [[ -f $notice ]] || continue
+            install -Dm644 "$notice" "$pkgdir/usr/share/licenses/$pkgname/$component/${notice##*/}"
+        done
+    done
+}

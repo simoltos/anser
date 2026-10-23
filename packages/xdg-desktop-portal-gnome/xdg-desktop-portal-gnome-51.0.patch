@@ -1,0 +1,2086 @@
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,7 @@
+ 
+ A backend implementation for [xdg-desktop-portal](http://github.com/flatpak/xdg-desktop-portal)
+ that is using GTK and various pieces of GNOME infrastructure, such as the
+-org.gnome.Shell.Screenshot or org.gnome.SessionManager D-Bus interfaces.
++org.honk.Shell.Screenshot or org.gnome.SessionManager D-Bus interfaces.
+ 
+ ## Building xdg-desktop-portal-gnome
+ 
+--- a/data/gnome.portal.in
++++ b/data/gnome.portal.in
+@@ -1,4 +1,4 @@
+ [portal]
+ DBusName=org.freedesktop.impl.portal.desktop.gnome
+ Interfaces=@PORTALS@;
+-UseIn=gnome
++UseIn=Honk;gnome;
+--- a/data/org.gnome.GlobalShortcutsProvider.xml
++++ b/data/org.gnome.GlobalShortcutsProvider.xml
+@@ -4,13 +4,13 @@
+ <node>
+ 
+   <!--
+-      org.gnome.Settings.GlobalShortcutsProvider:
++      org.honk.Settings.GlobalShortcutsProvider:
+       @short_description: Global shortcuts portal permissions UI
+ 
+       Provides a UI for the GlobalShortcuts portal, stores preferences, and
+       notifies the compositor of changes.
+   -->
+-  <interface name="org.gnome.Settings.GlobalShortcutsProvider">
++  <interface name="org.honk.Settings.GlobalShortcutsProvider">
+     <!--
+         BindShortcuts:
+         @app_id: Application ID
+--- a/data/org.gnome.GlobalShortcutsRebind.xml
++++ b/data/org.gnome.GlobalShortcutsRebind.xml
+@@ -4,12 +4,12 @@
+ <node>
+ 
+   <!--
+-      org.gnome.GlobalShortcutsRebind:
++      org.honk.GlobalShortcutsRebind:
+       @short_description: Global shortcuts portal rebind service
+ 
+       Propagates GlobalShortcuts changes which are requested by user, to the compositor and active clients.
+   -->
+-  <interface name="org.gnome.GlobalShortcutsRebind">
++  <interface name="org.honk.GlobalShortcutsRebind">
+     <!-- Changes current bindings.
+ 
+     Each element of `shortcuts` takes the form:
+--- a/data/org.gnome.Mutter.Clipboard.xml
++++ b/data/org.gnome.Mutter.Clipboard.xml
+@@ -3,7 +3,7 @@
+ 'http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd'>
+ <node>
+ 
+-  <interface name="org.gnome.Mutter.Clipboard">
++  <interface name="org.honk.HWin.Clipboard">
+ 
+     <!--
+         Enable:
+--- a/data/org.gnome.Mutter.DisplayConfig.xml
++++ b/data/org.gnome.Mutter.DisplayConfig.xml
+@@ -3,14 +3,14 @@
+ 'http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd'>
+ <node>
+   <!--
+-      org.gnome.Mutter.DisplayConfig:
++      org.honk.HWin.DisplayConfig:
+       @short_description: display configuration interface
+ 
+       This interface is used by mutter and gnome-settings-daemon
+       to apply multiple monitor configuration.
+   -->
+ 
+-  <interface name="org.gnome.Mutter.DisplayConfig">
++  <interface name="org.honk.HWin.DisplayConfig">
+ 
+     <!--
+         GetResources:
+--- a/data/org.gnome.Mutter.InputCapture.xml
++++ b/data/org.gnome.Mutter.InputCapture.xml
+@@ -4,14 +4,14 @@
+ <node>
+ 
+   <!--
+-      org.gnome.Mutter.InputCapture:
++      org.honk.HWin.InputCapture:
+       @short_description: Interface for input capture triggers
+ 
+       This API is private and not intended to be used outside of the integrated
+       system that uses libmutter. No compatibility between versions is
+       promised.
+   -->
+-  <interface name="org.gnome.Mutter.InputCapture">
++  <interface name="org.honk.HWin.InputCapture">
+ 
+     <method name="CreateSession">
+       <arg name="capabilities" type="u" direction="in" />
+@@ -31,7 +31,7 @@
+ 
+   </interface>
+ 
+-  <interface name="org.gnome.Mutter.InputCapture.Session">
++  <interface name="org.honk.HWin.InputCapture.Session">
+ 
+     <method name="GetZones">
+       <arg name="serial" type="u" direction="out" />
+--- a/data/org.gnome.Mutter.RemoteDesktop.xml
++++ b/data/org.gnome.Mutter.RemoteDesktop.xml
+@@ -4,14 +4,14 @@
+ <node>
+ 
+   <!--
+-      org.gnome.Mutter.RemoteDesktop:
++      org.honk.HWin.RemoteDesktop:
+       @short_description: Remote desktop interface
+ 
+       This API is private and not intended to be used outside of the integrated
+       system that uses libmutter. No compatibility between versions are
+       promised.
+   -->
+-  <interface name="org.gnome.Mutter.RemoteDesktop">
++  <interface name="org.honk.HWin.RemoteDesktop">
+ 
+     <!--
+ 	CreateSession:
+@@ -41,10 +41,10 @@
+   </interface>
+ 
+   <!--
+-       org.gnome.Mutter.RemoteDesktop.Session:
++       org.honk.HWin.RemoteDesktop.Session:
+        @short_description: Remote desktop session
+   -->
+-  <interface name="org.gnome.Mutter.RemoteDesktop.Session">
++  <interface name="org.honk.HWin.RemoteDesktop.Session">
+ 
+     <!--
+ 	SessionId:
+--- a/data/org.gnome.Mutter.ScreenCast.xml
++++ b/data/org.gnome.Mutter.ScreenCast.xml
+@@ -4,14 +4,14 @@
+ <node>
+ 
+   <!--
+-      org.gnome.Mutter.ScreenCast:
++      org.honk.HWin.ScreenCast:
+       @short_description: Screen cast interface
+ 
+       This API is private and not intended to be used outside of the integrated
+       system that uses libmutter. No compatibility between versions are
+       promised.
+   -->
+-  <interface name="org.gnome.Mutter.ScreenCast">
++  <interface name="org.honk.HWin.ScreenCast">
+ 
+     <!--
+ 	CreateSession:
+@@ -41,10 +41,10 @@
+   </interface>
+ 
+   <!--
+-       org.gnome.Mutter.ScreenCast.Session:
++       org.honk.HWin.ScreenCast.Session:
+        @short_description: Screen cast session
+   -->
+-  <interface name="org.gnome.Mutter.ScreenCast.Session">
++  <interface name="org.honk.HWin.ScreenCast.Session">
+ 
+     <!--
+ 	Start:
+@@ -185,10 +185,10 @@
+   </interface>
+ 
+   <!--
+-       org.gnome.Mutter.ScreenCast.Stream:
++       org.honk.HWin.ScreenCast.Stream:
+        @short_description: Screen cast stream
+   -->
+-  <interface name="org.gnome.Mutter.ScreenCast.Stream">
++  <interface name="org.honk.HWin.ScreenCast.Stream">
+ 
+     <!--
+ 	PipeWireStreamAdded:
+--- a/data/org.gnome.Shell.Introspect.xml
++++ b/data/org.gnome.Shell.Introspect.xml
+@@ -4,13 +4,13 @@
+ <node>
+ 
+   <!--
+-      org.gnome.Shell.Introspect:
++      org.honk.Shell.Introspect:
+       @short_description: Introspection interface
+ 
+       The interface used to introspect the state of Shell, such as running
+       applications, currently active application, etc.
+   -->
+-  <interface name="org.gnome.Shell.Introspect">
++  <interface name="org.honk.Shell.Introspect">
+ 
+     <!--
+         RunningApplicationsChanged:
+--- a/data/org.gnome.Shell.Screenshot.xml
++++ b/data/org.gnome.Shell.Screenshot.xml
+@@ -4,12 +4,12 @@
+ <node>
+ 
+   <!--
+-      org.gnome.Shell.Screenshot:
++      org.honk.Shell.Screenshot:
+       @short_description: Screenshot interface
+ 
+       The interface used to capture pictures of the screen contents.
+   -->
+-  <interface name="org.gnome.Shell.Screenshot">
++  <interface name="org.honk.Shell.Screenshot">
+ 
+     <!--
+         InteractiveScreenshot:
+--- a/data/org.gnome.Shell.xml
++++ b/data/org.gnome.Shell.xml
+@@ -1,5 +1,5 @@
+ <node>
+-  <interface name="org.gnome.Shell">
++  <interface name="org.honk.Shell">
+     <method name="Eval">
+       <arg type="s" direction="in" name="script"/>
+       <arg type="b" direction="out" name="success"/>
+--- a/demo/display-config-mock.py
++++ b/demo/display-config-mock.py
+@@ -12,9 +12,9 @@
+ 
+ DBusGMainLoop(set_as_default=True)
+ 
+-OPATH = "/org/gnome/Mutter/DisplayConfig"
+-IFACE = "org.gnome.Mutter.DisplayConfig"
+-BUS_NAME = "org.gnome.Mutter.DisplayConfigMock"
++OPATH = "/org/honk/HWin/DisplayConfig"
++IFACE = "org.honk.HWin.DisplayConfig"
++BUS_NAME = "org.honk.HWin.DisplayConfigMock"
+ 
+ DISPLAY_CONFIGS = [
+     [
+--- a/demo/mock-build-and-run.sh
++++ b/demo/mock-build-and-run.sh
+@@ -7,7 +7,7 @@
+ 
+ function name-override {
+ 	echo "-] Override displaystatetracker.c: \"$1\" -> \"$2\""
+-	sed -i 's/"org.gnome.Mutter.DisplayConfig'$1'"/"org.gnome.Mutter.DisplayConfig'$2'"/g' ../src/displaystatetracker.c
++	sed -i 's/"org.honk.HWin.DisplayConfig'$1'"/"org.honk.HWin.DisplayConfig'$2'"/g' ../src/displaystatetracker.c
+ }
+ ./display-config-mock.py & PID=$! || ( echo "Failed to start display-config-mock.py!" && exit 1 )
+ trap 'name-override Mock ""' EXIT
+--- a/src/access.c
++++ b/src/access.c
+@@ -333,7 +333,7 @@
+ 
+       conn = g_dbus_method_invocation_get_connection (invocation);
+       g_dbus_connection_call (conn,
+-                              "org.gnome.Shell",
++                              "org.honk.Shell",
+                               DESKTOP_PORTAL_OBJECT_PATH,
+                               "org.freedesktop.impl.portal.Access",
+                               "AccessDialog",
+--- a/src/background.c
++++ b/src/background.c
+@@ -21,7 +21,7 @@
+ #include "request.h"
+ #include "utils.h"
+ 
+-static OrgGnomeShellIntrospect *shell;
++static OrgHonkShellIntrospect *shell;
+ 
+ typedef enum { BACKGROUND, RUNNING, ACTIVE } AppState;
+ 
+@@ -52,7 +52,7 @@
+   const char *key;
+   gpointer value;
+ 
+-  if (!org_gnome_shell_introspect_call_get_running_applications_sync (shell, &apps, NULL, NULL))
++  if (!org_honk_shell_introspect_call_get_running_applications_sync (shell, &apps, NULL, NULL))
+     {
+       return NULL;
+     }
+@@ -336,7 +336,7 @@
+ }
+ 
+ static void
+-running_applications_changed (OrgGnomeShellIntrospect *object,
++running_applications_changed (OrgHonkShellIntrospect *object,
+                               GDBusInterfaceSkeleton *helper)
+ {
+   GVariant *new_app_state;
+@@ -369,10 +369,10 @@
+ {
+   GDBusInterfaceSkeleton *helper;
+ 
+-  shell = org_gnome_shell_introspect_proxy_new_sync (bus,
++  shell = org_honk_shell_introspect_proxy_new_sync (bus,
+                                                      G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                     "org.gnome.Shell",
+-                                                     "/org/gnome/Shell/Introspect",
++                                                     "org.honk.Shell",
++                                                     "/org/honk/Shell/Introspect",
+                                                      NULL,
+                                                      NULL);
+   helper = G_DBUS_INTERFACE_SKELETON (xdp_impl_background_skeleton_new ());
+--- a/src/clipboard.c
++++ b/src/clipboard.c
+@@ -57,7 +57,7 @@
+   iface->request_clipboard (clipboard_session);
+ }
+ 
+-static OrgGnomeMutterClipboard *
++static OrgHonkHWinClipboard *
+ clipboard_session_get_clipboard_proxy (ClipboardSession *clipboard_session)
+ {
+   ClipboardSessionInterface *iface = CLIPBOARD_SESSION_GET_IFACE (clipboard_session);
+@@ -66,7 +66,7 @@
+ }
+ 
+ static void
+-on_selection_owner_changed (OrgGnomeMutterClipboard *clipboard_proxy,
++on_selection_owner_changed (OrgHonkHWinClipboard *clipboard_proxy,
+                             GVariant                *arg_options,
+                             ClipboardSession        *clipboard_session)
+ {
+@@ -122,7 +122,7 @@
+ }
+ 
+ static void
+-on_selection_transfer (OrgGnomeMutterClipboard *clipboard_proxy,
++on_selection_transfer (OrgHonkHWinClipboard *clipboard_proxy,
+                        const char              *arg_mime_type,
+                        uint32_t                 arg_serial,
+                        ClipboardSession        *clipboard_session)
+@@ -177,7 +177,7 @@
+                       const char            *arg_session_handle,
+                       GVariant              *arg_options)
+ {
+-  OrgGnomeMutterClipboard *clipboard_proxy;
++  OrgHonkHWinClipboard *clipboard_proxy;
+   g_autoptr (GVariant) value = NULL;
+   g_autoptr (GError) error = NULL;
+   g_auto(GVariantBuilder) options_builder =
+@@ -237,7 +237,7 @@
+ 
+   options = g_variant_ref_sink (g_variant_builder_end (&options_builder));
+ 
+-  if (!org_gnome_mutter_clipboard_call_set_selection_sync (clipboard_proxy,
++  if (!org_honk_hwin_clipboard_call_set_selection_sync (clipboard_proxy,
+                                                            options,
+                                                            NULL,
+                                                            &error))
+@@ -262,7 +262,7 @@
+                         const char            *arg_session_handle,
+                         uint32_t               arg_serial)
+ {
+-  OrgGnomeMutterClipboard *clipboard_proxy;
++  OrgHonkHWinClipboard *clipboard_proxy;
+   g_autoptr (GUnixFDList) out_fd_list = NULL;
+   g_autoptr (GUnixFDList) fd_list = NULL;
+   g_autoptr (GError) error = NULL;
+@@ -308,7 +308,7 @@
+ 
+   out_fd_list = g_unix_fd_list_new ();
+ 
+-  if (!org_gnome_mutter_clipboard_call_selection_write_sync (clipboard_proxy,
++  if (!org_honk_hwin_clipboard_call_selection_write_sync (clipboard_proxy,
+                                                              arg_serial,
+                                                              NULL,
+                                                              &fd_handle,
+@@ -343,7 +343,7 @@
+                              uint32_t               arg_serial,
+                              gboolean               arg_success)
+ {
+-  OrgGnomeMutterClipboard *clipboard_proxy;
++  OrgHonkHWinClipboard *clipboard_proxy;
+   g_autoptr (GUnixFDList) out_fd_list = NULL;
+   g_autoptr (GError) error = NULL;
+   Session *session;
+@@ -382,7 +382,7 @@
+       return G_DBUS_METHOD_INVOCATION_HANDLED;
+     }
+ 
+-  if (!org_gnome_mutter_clipboard_call_selection_write_done_sync (clipboard_proxy,
++  if (!org_honk_hwin_clipboard_call_selection_write_done_sync (clipboard_proxy,
+                                                                   arg_serial,
+                                                                   arg_success,
+                                                                   NULL,
+@@ -408,7 +408,7 @@
+                        const char            *arg_session_handle,
+                        const char            *arg_mime_type)
+ {
+-  OrgGnomeMutterClipboard *clipboard_proxy;
++  OrgHonkHWinClipboard *clipboard_proxy;
+   g_autoptr (GUnixFDList) out_fd_list = NULL;
+   g_autoptr (GError) error = NULL;
+   Session *session;
+@@ -448,7 +448,7 @@
+       return G_DBUS_METHOD_INVOCATION_HANDLED;
+     }
+ 
+-  if (!org_gnome_mutter_clipboard_call_selection_read_sync (clipboard_proxy,
++  if (!org_honk_hwin_clipboard_call_selection_read_sync (clipboard_proxy,
+                                                             arg_mime_type,
+                                                             NULL,
+                                                             &fd,
+@@ -509,7 +509,7 @@
+ gboolean
+ clipboard_add_session (ClipboardSession *clipboard_session)
+ {
+-  OrgGnomeMutterClipboard *clipboard_proxy;
++  OrgHonkHWinClipboard *clipboard_proxy;
+   GVariantBuilder options_builder;
+   GVariant *options;
+   g_autoptr (GError) error = NULL;
+@@ -519,7 +519,7 @@
+ 
+   g_variant_builder_init (&options_builder, G_VARIANT_TYPE_VARDICT);
+   options = g_variant_builder_end (&options_builder);
+-  if (!org_gnome_mutter_clipboard_call_enable_sync (clipboard_proxy,
++  if (!org_honk_hwin_clipboard_call_enable_sync (clipboard_proxy,
+                                                     options,
+                                                     NULL,
+                                                     &error))
+@@ -544,14 +544,14 @@
+ void
+ clipboard_remove_session (ClipboardSession *clipboard_session)
+ {
+-  OrgGnomeMutterClipboard *clipboard_proxy;
++  OrgHonkHWinClipboard *clipboard_proxy;
+   g_autoptr (GError) error = NULL;
+ 
+   clipboard_proxy =
+     clipboard_session_get_clipboard_proxy (clipboard_session);
+   g_return_if_fail (clipboard_proxy);
+ 
+-  if (!org_gnome_mutter_clipboard_call_disable_sync (clipboard_proxy,
++  if (!org_honk_hwin_clipboard_call_disable_sync (clipboard_proxy,
+                                                      NULL,
+                                                      &error))
+     {
+--- a/src/clipboard.h
++++ b/src/clipboard.h
+@@ -33,7 +33,7 @@
+   GTypeInterface parent_iface;
+ 
+   void (* request_clipboard) (ClipboardSession *clipboard_session);
+-  OrgGnomeMutterClipboard * (* get_clipboard_proxy) (ClipboardSession *clipboard_session);
++  OrgHonkHWinClipboard * (* get_clipboard_proxy) (ClipboardSession *clipboard_session);
+ };
+ 
+ gboolean is_clipboard_session (Session *session);
+--- a/src/displaystatetracker.c
++++ b/src/displaystatetracker.c
+@@ -44,7 +44,7 @@
+   SC_DISPLAY_ROTATION_270_FLIPPED,
+ } ScDisplayRotation;
+ 
+-/* Equivalent to the 'layout-mode' enum in org.gnome.Mutter.DisplayConfig */
++/* Equivalent to the 'layout-mode' enum in org.honk.HWin.DisplayConfig */
+ typedef enum _MetaLogicalMonitorLayoutMode
+ {
+   META_LOGICAL_MONITOR_LAYOUT_MODE_LOGICAL = 1,
+@@ -82,7 +82,7 @@
+   guint display_config_watch_name_id;
+   GCancellable *cancellable;
+ 
+-  OrgGnomeMutterDisplayConfig *proxy;
++  OrgHonkHWinDisplayConfig *proxy;
+ 
+   GHashTable *monitors;
+   GList *logical_monitors;
+@@ -419,15 +419,15 @@
+                       GAsyncResult *res,
+                       gpointer user_data)
+ {
+-  OrgGnomeMutterDisplayConfig *proxy =
+-    ORG_GNOME_MUTTER_DISPLAY_CONFIG (source_object);
++  OrgHonkHWinDisplayConfig *proxy =
++    ORG_HONK_HWIN_DISPLAY_CONFIG (source_object);
+   DisplayStateTracker *tracker = user_data;
+   g_autoptr(GVariant) monitors = NULL;
+   g_autoptr(GVariant) logical_monitors = NULL;
+   g_autoptr(GVariant) properties = NULL;
+   g_autoptr(GError) error = NULL;
+ 
+-  if (!org_gnome_mutter_display_config_call_get_current_state_finish (proxy,
++  if (!org_honk_hwin_display_config_call_get_current_state_finish (proxy,
+                                                                       NULL,
+                                                                       &monitors,
+                                                                       &logical_monitors,
+@@ -455,14 +455,14 @@
+ static void
+ sync_state (DisplayStateTracker *tracker)
+ {
+-  org_gnome_mutter_display_config_call_get_current_state (tracker->proxy,
++  org_honk_hwin_display_config_call_get_current_state (tracker->proxy,
+                                                           tracker->cancellable,
+                                                           get_current_state_cb,
+                                                           tracker);
+ }
+ 
+ static void
+-on_monitors_changed (OrgGnomeMutterDisplayConfig *proxy,
++on_monitors_changed (OrgHonkHWinDisplayConfig *proxy,
+                      DisplayStateTracker *tracker)
+ {
+   sync_state (tracker);
+@@ -474,15 +474,15 @@
+                                   gpointer      user_data)
+ {
+   DisplayStateTracker *tracker;
+-  g_autoptr(OrgGnomeMutterDisplayConfig) proxy = NULL;
++  g_autoptr(OrgHonkHWinDisplayConfig) proxy = NULL;
+   g_autoptr(GError) error = NULL;
+ 
+   tracker = DISPLAY_STATE_TRACKER (user_data);
+ 
+-  proxy = org_gnome_mutter_display_config_proxy_new_for_bus_finish (result, &error);
++  proxy = org_honk_hwin_display_config_proxy_new_for_bus_finish (result, &error);
+   if (!proxy)
+     {
+-      g_warning ("Failed to acquire org.gnome.Mutter.DisplayConfig proxy: %s",
++      g_warning ("Failed to acquire org.honk.HWin.DisplayConfig proxy: %s",
+                  error->message);
+       return;
+     }
+@@ -519,10 +519,10 @@
+   display_state_tracker_clear_cancel (tracker);
+   tracker->cancellable = g_cancellable_new ();
+ 
+-  org_gnome_mutter_display_config_proxy_new_for_bus (G_BUS_TYPE_SESSION,
++  org_honk_hwin_display_config_proxy_new_for_bus (G_BUS_TYPE_SESSION,
+                                                      G_DBUS_PROXY_FLAGS_NONE,
+-                                                     "org.gnome.Mutter.DisplayConfig",
+-                                                     "/org/gnome/Mutter/DisplayConfig",
++                                                     "org.honk.HWin.DisplayConfig",
++                                                     "/org/honk/HWin/DisplayConfig",
+                                                      tracker->cancellable,
+                                                      on_display_config_proxy_acquired,
+                                                      tracker);
+@@ -570,7 +570,7 @@
+ 
+   self->display_config_watch_name_id =
+     g_bus_watch_name (G_BUS_TYPE_SESSION,
+-                      "org.gnome.Mutter.DisplayConfig",
++                      "org.honk.HWin.DisplayConfig",
+                       G_BUS_NAME_WATCHER_FLAGS_NONE,
+                       on_display_config_name_appeared,
+                       on_display_config_name_vanished,
+--- a/src/globalshortcuts.c
++++ b/src/globalshortcuts.c
+@@ -17,10 +17,10 @@
+ 
+ #define META_KEY_BINDING_TRIGGER_RELEASE (1 << 7)
+ 
+-static OrgGnomeShell *shell;
+-static OrgGnomeSettingsGlobalShortcutsProvider *settings;
++static OrgHonkShell *shell;
++static OrgHonkSettingsGlobalShortcutsProvider *settings;
+ static XdpImplGlobalShortcuts *global_shortcuts;
+-static OrgGnomeGlobalShortcutsRebind *global_shortcuts_rebind;
++static OrgHonkGlobalShortcutsRebind *global_shortcuts_rebind;
+ 
+ typedef struct _Accelerator
+ {
+@@ -226,7 +226,7 @@
+   g_autoptr(GError) error = NULL;
+   gboolean success;
+ 
+-  if (!org_gnome_shell_call_ungrab_accelerators_finish (shell, &success, result, &error))
++  if (!org_honk_shell_call_ungrab_accelerators_finish (shell, &success, result, &error))
+     g_debug ("Error from shell UnbindShortcuts: %s", error->message);
+ 
+   if (!success)
+@@ -257,7 +257,7 @@
+ 
+   variant = shortcuts_to_ungrab_accelerator_variant (shortcuts_session);
+ 
+-  org_gnome_shell_call_ungrab_accelerators (shell,
++  org_honk_shell_call_ungrab_accelerators (shell,
+                                             variant,
+                                             NULL,
+                                             shell_ungrab_accelerators_done,
+@@ -523,7 +523,7 @@
+                               GAsyncResult *result,
+                               gpointer      data)
+ {
+-  OrgGnomeShell *proxy = (OrgGnomeShell *) source;
++  OrgHonkShell *proxy = (OrgHonkShell *) source;
+   GlobalShortcutsSession *shortcuts_session;
+   g_autoptr(BindShortcutsHandle) handle = data;
+   g_autoptr(GVariant) results = NULL, shortcuts = NULL;
+@@ -534,7 +534,7 @@
+   guint accel_id;
+   int i = 0;
+ 
+-  if (!org_gnome_shell_call_grab_accelerators_finish (proxy,
++  if (!org_honk_shell_call_grab_accelerators_finish (proxy,
+                                                       &results,
+                                                       result,
+                                                       &error))
+@@ -584,7 +584,7 @@
+                               GAsyncResult *result,
+                               gpointer      data)
+ {
+-  OrgGnomeSettingsGlobalShortcutsProvider *proxy = (OrgGnomeSettingsGlobalShortcutsProvider *) source;
++  OrgHonkSettingsGlobalShortcutsProvider *proxy = (OrgHonkSettingsGlobalShortcutsProvider *) source;
+   g_autoptr(BindShortcutsHandle) handle = data;
+   GlobalShortcutsSession *session = (GlobalShortcutsSession *) handle->session;
+   g_autoptr(GVariant) response = NULL;
+@@ -592,7 +592,7 @@
+   g_autoptr(GVariant) variant = NULL;
+   g_autoptr(GError) error = NULL;
+ 
+-  if (!org_gnome_settings_global_shortcuts_provider_call_bind_shortcuts_finish (proxy,
++  if (!org_honk_settings_global_shortcuts_provider_call_bind_shortcuts_finish (proxy,
+                                                                                 &response,
+                                                                                 result,
+                                                                                 &error))
+@@ -619,7 +619,7 @@
+   settings_response_to_shortcuts (session, response);
+   variant = shortcuts_to_grab_accelerator_variant (session, handle);
+ 
+-  org_gnome_shell_call_grab_accelerators (shell,
++  org_honk_shell_call_grab_accelerators (shell,
+                                           variant,
+                                           NULL,
+                                           shell_grab_accelerators_done,
+@@ -686,7 +686,7 @@
+ 
+   settings_shortcuts = portal_shortcuts_to_settings (arg_shortcuts);
+ 
+-  org_gnome_settings_global_shortcuts_provider_call_bind_shortcuts (settings,
++  org_honk_settings_global_shortcuts_provider_call_bind_shortcuts (settings,
+                                                                     shortcuts_session->app_id,
+                                                                     arg_parent_window,
+                                                                     settings_shortcuts,
+@@ -759,7 +759,7 @@
+   guint accel_id;
+   guint i = 0;
+ 
+-  if (!org_gnome_shell_call_grab_accelerators_finish (shell, &response, result, &error))
++  if (!org_honk_shell_call_grab_accelerators_finish (shell, &response, result, &error))
+     g_debug ("Error during RebindShortcuts: %s", error->message);
+ 
+   shortcuts_session = (GlobalShortcutsSession *) handle->session;
+@@ -793,7 +793,7 @@
+     }
+ 
+   if (handle->invocation)
+-    org_gnome_global_shortcuts_rebind_complete_rebind_shortcuts (global_shortcuts_rebind,
++    org_honk_global_shortcuts_rebind_complete_rebind_shortcuts (global_shortcuts_rebind,
+                                                                  handle->invocation);
+ }
+ 
+@@ -808,7 +808,7 @@
+   g_autoptr(GError) error = NULL;
+   gboolean success;
+ 
+-  if (!org_gnome_shell_call_ungrab_accelerators_finish (shell, &success, result, &error))
++  if (!org_honk_shell_call_ungrab_accelerators_finish (shell, &success, result, &error))
+     g_debug ("Error during RebindShortcuts: %s", error->message);
+ 
+   if (!success)
+@@ -816,7 +816,7 @@
+ 
+   variant = shortcuts_to_grab_accelerator_variant (session, handle);
+ 
+-  org_gnome_shell_call_grab_accelerators (shell,
++  org_honk_shell_call_grab_accelerators (shell,
+                                           variant,
+                                           NULL,
+                                           shell_grab_accelerators_rebind_done,
+@@ -861,7 +861,7 @@
+                         session->shortcuts->len);
+   settings_response_to_shortcuts (session, shortcuts);
+ 
+-  org_gnome_shell_call_ungrab_accelerators (shell,
++  org_honk_shell_call_ungrab_accelerators (shell,
+                                             variant,
+                                             NULL,
+                                             shell_ungrab_accelerators_rebind_done,
+@@ -869,7 +869,7 @@
+ }
+ 
+ static gboolean
+-handle_rebind_shortcuts (OrgGnomeGlobalShortcutsRebind *object,
++handle_rebind_shortcuts (OrgHonkGlobalShortcutsRebind *object,
+                          GDBusMethodInvocation         *invocation,
+                          const char                    *arg_app_id,
+                          GVariant                      *arg_shortcuts)
+@@ -881,7 +881,7 @@
+   if (!session)
+     {
+       g_debug ("Session for app %s not found in RebindShortcuts", arg_app_id);
+-      org_gnome_global_shortcuts_rebind_complete_rebind_shortcuts (object, invocation);
++      org_honk_global_shortcuts_rebind_complete_rebind_shortcuts (object, invocation);
+       return TRUE;
+     }
+ 
+@@ -898,14 +898,14 @@
+                                    GAsyncResult *result,
+                                    gpointer      data)
+ {
+-  OrgGnomeSettingsGlobalShortcutsProvider *proxy = (OrgGnomeSettingsGlobalShortcutsProvider *) source;
++  OrgHonkSettingsGlobalShortcutsProvider *proxy = (OrgHonkSettingsGlobalShortcutsProvider *) source;
+   g_autofree char *app_id = data;
+   g_autoptr(GVariant) response = NULL;
+   g_autoptr(GError) error = NULL;
+   Session *session;
+   GlobalShortcutsSession *shortcuts_session;
+ 
+-  if (!org_gnome_settings_global_shortcuts_provider_call_configure_shortcuts_finish (proxy,
++  if (!org_honk_settings_global_shortcuts_provider_call_configure_shortcuts_finish (proxy,
+                                                                                      &response,
+                                                                                      result,
+                                                                                      &error))
+@@ -967,7 +967,7 @@
+ 
+   if (shortcuts_session->bound)
+     {
+-      org_gnome_settings_global_shortcuts_provider_call_configure_shortcuts (settings,
++      org_honk_settings_global_shortcuts_provider_call_configure_shortcuts (settings,
+                                                                              shortcuts_session->app_id,
+                                                                              arg_parent_window,
+                                                                              NULL,
+@@ -981,7 +981,7 @@
+       g_debug ("Recovering session by calling BindShortcuts internally");
+       shortcuts_session->bound = TRUE;
+       settings_shortcuts = portal_shortcuts_to_settings (shortcuts_session->initial_shortcuts);
+-      org_gnome_settings_global_shortcuts_provider_call_bind_shortcuts (settings,
++      org_honk_settings_global_shortcuts_provider_call_bind_shortcuts (settings,
+                                                                         shortcuts_session->app_id,
+                                                                         arg_parent_window,
+                                                                         settings_shortcuts,
+@@ -1082,7 +1082,7 @@
+ }
+ 
+ static void
+-on_shell_activated (OrgGnomeShell *shell,
++on_shell_activated (OrgHonkShell *shell,
+                     guint          action,
+                     GVariant      *parameters,
+                     gpointer       data)
+@@ -1126,7 +1126,7 @@
+ }
+ 
+ static void
+-on_shell_deactivated (OrgGnomeShell *shell,
++on_shell_deactivated (OrgHonkShell *shell,
+                       guint          action,
+                       GVariant      *parameters,
+                       gpointer       data)
+@@ -1187,7 +1187,7 @@
+                                          error))
+     return FALSE;
+ 
+-  global_shortcuts_rebind = org_gnome_global_shortcuts_rebind_skeleton_new ();
++  global_shortcuts_rebind = org_honk_global_shortcuts_rebind_skeleton_new ();
+   g_signal_connect (global_shortcuts_rebind, "handle-rebind-shortcuts", G_CALLBACK (handle_rebind_shortcuts), NULL);
+ 
+   if (!g_dbus_interface_skeleton_export (G_DBUS_INTERFACE_SKELETON (global_shortcuts_rebind),
+@@ -1196,10 +1196,10 @@
+                                          error))
+     return FALSE;
+ 
+-  shell = org_gnome_shell_proxy_new_sync (bus,
++  shell = org_honk_shell_proxy_new_sync (bus,
+                                           G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                          "org.gnome.Shell",
+-                                          "/org/gnome/Shell",
++                                          "org.honk.Shell",
++                                          "/org/honk/Shell",
+                                           NULL,
+                                           error);
+   if (shell == NULL)
+@@ -1210,10 +1210,10 @@
+ 
+   g_dbus_proxy_set_default_timeout (G_DBUS_PROXY (shell), G_MAXINT);
+ 
+-  settings = org_gnome_settings_global_shortcuts_provider_proxy_new_sync (bus,
++  settings = org_honk_settings_global_shortcuts_provider_proxy_new_sync (bus,
+                                                                           G_DBUS_PROXY_FLAGS_NONE,
+-                                                                          "org.gnome.Settings.GlobalShortcutsProvider",
+-                                                                          "/org/gnome/Settings/GlobalShortcutsProvider",
++                                                                          "org.honk.Settings.GlobalShortcutsProvider",
++                                                                          "/org/honk/Settings/GlobalShortcutsProvider",
+                                                                           NULL,
+                                                                           error);
+   if (settings == NULL)
+--- a/src/gnomeinputcapture.c
++++ b/src/gnomeinputcapture.c
+@@ -53,7 +53,7 @@
+   GObject parent;
+ 
+   char *path;
+-  OrgGnomeMutterInputCaptureSession *proxy;
++  OrgHonkHWinInputCaptureSession *proxy;
+ 
+   uint32_t serial;
+ } GnomeInputCaptureSession;
+@@ -63,7 +63,7 @@
+   GObject parent;
+ 
+   guint input_capture_name_watch;
+-  OrgGnomeMutterInputCapture *proxy;
++  OrgHonkHWinInputCapture *proxy;
+ 
+   uint32_t supported_capabilities;
+ } GnomeInputCapture;
+@@ -159,21 +159,21 @@
+   g_autoptr(GError) error = NULL;
+ 
+   gnome_input_capture->proxy =
+-    org_gnome_mutter_input_capture_proxy_new_sync (connection,
++    org_honk_hwin_input_capture_proxy_new_sync (connection,
+                                                    G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                   "org.gnome.Mutter.InputCapture",
+-                                                   "/org/gnome/Mutter/InputCapture",
++                                                   "org.honk.HWin.InputCapture",
++                                                   "/org/honk/HWin/InputCapture",
+                                                    NULL,
+                                                    &error);
+   if (!gnome_input_capture->proxy)
+     {
+-      g_warning ("Failed to acquire org.gnome.Mutter.InputCapture proxy: %s",
++      g_warning ("Failed to acquire org.honk.HWin.InputCapture proxy: %s",
+                  error->message);
+       return;
+     }
+ 
+   gnome_input_capture->supported_capabilities =
+-    org_gnome_mutter_input_capture_get_supported_capabilities (
++    org_honk_hwin_input_capture_get_supported_capabilities (
+       gnome_input_capture->proxy);
+ 
+   g_signal_emit (gnome_input_capture, signals[ENABLED], 0);
+@@ -223,7 +223,7 @@
+   gnome_input_capture = g_object_new (gnome_input_capture_get_type (), NULL);
+   gnome_input_capture->input_capture_name_watch =
+     g_bus_watch_name (G_BUS_TYPE_SESSION,
+-                      "org.gnome.Mutter.InputCapture",
++                      "org.honk.HWin.InputCapture",
+                       G_BUS_NAME_WATCHER_FLAGS_NONE,
+                       gnome_input_capture_name_appeared,
+                       gnome_input_capture_name_vanished,
+@@ -240,7 +240,7 @@
+ }
+ 
+ static void
+-on_input_capture_session_zones_changed (OrgGnomeMutterInputCaptureSession *session_proxy,
++on_input_capture_session_zones_changed (OrgHonkHWinInputCaptureSession *session_proxy,
+                                         GnomeInputCaptureSession          *gnome_input_capture_session)
+ {
+   g_signal_emit (gnome_input_capture_session,
+@@ -248,7 +248,7 @@
+ }
+ 
+ static void
+-on_input_capture_session_activated (OrgGnomeMutterInputCaptureSession *session_proxy,
++on_input_capture_session_activated (OrgHonkHWinInputCaptureSession *session_proxy,
+                                     unsigned int                       barrier_id,
+                                     unsigned int                       activation_id,
+                                     GVariant                          *cursor_position,
+@@ -266,7 +266,7 @@
+ }
+ 
+ static void
+-on_input_capture_session_deactivated (OrgGnomeMutterInputCaptureSession *session_proxy,
++on_input_capture_session_deactivated (OrgHonkHWinInputCaptureSession *session_proxy,
+                                       unsigned int                       activation_id,
+                                       GnomeInputCaptureSession          *gnome_input_capture_session)
+ {
+@@ -275,7 +275,7 @@
+ }
+ 
+ static void
+-on_input_capture_session_disabled (OrgGnomeMutterInputCaptureSession *session_proxy,
++on_input_capture_session_disabled (OrgHonkHWinInputCaptureSession *session_proxy,
+                                    GnomeInputCaptureSession          *gnome_input_capture_session)
+ {
+   g_signal_emit (gnome_input_capture_session,
+@@ -283,7 +283,7 @@
+ }
+ 
+ static void
+-on_input_capture_session_closed (OrgGnomeMutterInputCaptureSession *session_proxy,
++on_input_capture_session_closed (OrgHonkHWinInputCaptureSession *session_proxy,
+                                  GnomeInputCaptureSession          *gnome_input_capture_session)
+ {
+   g_signal_emit (gnome_input_capture_session,
+@@ -297,10 +297,10 @@
+ {
+   g_autofree char *session_path = NULL;
+   GDBusConnection *connection;
+-  OrgGnomeMutterInputCaptureSession *session_proxy;
++  OrgHonkHWinInputCaptureSession *session_proxy;
+   GnomeInputCaptureSession *gnome_input_capture_session;
+ 
+-  if (!org_gnome_mutter_input_capture_call_create_session_sync (gnome_input_capture->proxy,
++  if (!org_honk_hwin_input_capture_call_create_session_sync (gnome_input_capture->proxy,
+                                                                 capabilities,
+                                                                 &session_path,
+                                                                 NULL,
+@@ -309,9 +309,9 @@
+ 
+   connection = g_dbus_proxy_get_connection (G_DBUS_PROXY (gnome_input_capture->proxy));
+   session_proxy =
+-    org_gnome_mutter_input_capture_session_proxy_new_sync (connection,
++    org_honk_hwin_input_capture_session_proxy_new_sync (connection,
+                                                            G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                           "org.gnome.Mutter.InputCapture",
++                                                           "org.honk.HWin.InputCapture",
+                                                            session_path,
+                                                            NULL,
+                                                            error);
+@@ -351,10 +351,10 @@
+ gnome_input_capture_session_enable (GnomeInputCaptureSession  *gnome_input_capture_session,
+                                     GError                   **error)
+ {
+-  OrgGnomeMutterInputCaptureSession *session_proxy =
+-    gnome_input_capture_session->proxy;
+-
+-  if (!org_gnome_mutter_input_capture_session_call_enable_sync (session_proxy,
++  OrgHonkHWinInputCaptureSession *session_proxy =
++    gnome_input_capture_session->proxy;
++
++  if (!org_honk_hwin_input_capture_session_call_enable_sync (session_proxy,
+                                                                 NULL,
+                                                                 error))
+     return FALSE;
+@@ -366,10 +366,10 @@
+ gnome_input_capture_session_disable (GnomeInputCaptureSession  *gnome_input_capture_session,
+                                      GError                   **error)
+ {
+-  OrgGnomeMutterInputCaptureSession *session_proxy =
+-    gnome_input_capture_session->proxy;
+-
+-  if (!org_gnome_mutter_input_capture_session_call_disable_sync (session_proxy,
++  OrgHonkHWinInputCaptureSession *session_proxy =
++    gnome_input_capture_session->proxy;
++
++  if (!org_honk_hwin_input_capture_session_call_disable_sync (session_proxy,
+                                                                  NULL,
+                                                                  error))
+     return FALSE;
+@@ -381,7 +381,7 @@
+ gnome_input_capture_session_get_zones (GnomeInputCaptureSession  *gnome_input_capture_session,
+                                        GError                   **error)
+ {
+-  OrgGnomeMutterInputCaptureSession *session_proxy =
++  OrgHonkHWinInputCaptureSession *session_proxy =
+     gnome_input_capture_session->proxy;
+   g_autoptr(GVariant) zones_variant = NULL;
+   GVariantIter iter;
+@@ -389,7 +389,7 @@
+   int32_t x, y;
+   GList *zones = NULL;
+ 
+-  if (!org_gnome_mutter_input_capture_session_call_get_zones_sync (
++  if (!org_honk_hwin_input_capture_session_call_get_zones_sync (
+         session_proxy,
+         &gnome_input_capture_session->serial,
+         &zones_variant,
+@@ -425,13 +425,13 @@
+                                          int32_t                    y2,
+                                          GError                   **error)
+ {
+-  OrgGnomeMutterInputCaptureSession *session_proxy =
++  OrgHonkHWinInputCaptureSession *session_proxy =
+     gnome_input_capture_session->proxy;
+   uint32_t serial;
+   uint32_t barrier_id;
+ 
+   serial = gnome_input_capture_session->serial;
+-  if (!org_gnome_mutter_input_capture_session_call_add_barrier_sync (
++  if (!org_honk_hwin_input_capture_session_call_add_barrier_sync (
+         session_proxy,
+         serial,
+         g_variant_new ("(iiii)", x1, y1, x2, y2),
+@@ -449,10 +449,10 @@
+ gnome_input_capture_session_clear_barriers (GnomeInputCaptureSession  *gnome_input_capture_session,
+                                             GError                   **error)
+ {
+-  OrgGnomeMutterInputCaptureSession *session_proxy =
+-    gnome_input_capture_session->proxy;
+-
+-  if (!org_gnome_mutter_input_capture_session_call_clear_barriers_sync (
++  OrgHonkHWinInputCaptureSession *session_proxy =
++    gnome_input_capture_session->proxy;
++
++  if (!org_honk_hwin_input_capture_session_call_clear_barriers_sync (
+         session_proxy, NULL, error))
+     {
+       g_prefix_error (error, "Failed to clear barriers: ");
+@@ -469,7 +469,7 @@
+                                      double                     cursor_position_y,
+                                      GError                   **error)
+ {
+-  OrgGnomeMutterInputCaptureSession *session_proxy =
++  OrgHonkHWinInputCaptureSession *session_proxy =
+     gnome_input_capture_session->proxy;
+   GVariantBuilder options_builder;
+ 
+@@ -484,7 +484,7 @@
+                                             cursor_position_y));
+     }
+ 
+-  if (!org_gnome_mutter_input_capture_session_call_release_sync (
++  if (!org_honk_hwin_input_capture_session_call_release_sync (
+         session_proxy,
+         g_variant_builder_end (&options_builder),
+         NULL, error))
+@@ -500,10 +500,10 @@
+ gnome_input_capture_session_close (GnomeInputCaptureSession  *gnome_input_capture_session,
+                                    GError                   **error)
+ {
+-  OrgGnomeMutterInputCaptureSession *session_proxy =
+-    gnome_input_capture_session->proxy;
+-
+-  return org_gnome_mutter_input_capture_session_call_close_sync (session_proxy,
++  OrgHonkHWinInputCaptureSession *session_proxy =
++    gnome_input_capture_session->proxy;
++
++  return org_honk_hwin_input_capture_session_call_close_sync (session_proxy,
+                                                                  NULL,
+                                                                  error);
+ }
+@@ -520,11 +520,11 @@
+                                     GVariant                 **fd_variant,
+                                     GError                   **error)
+ {
+-  OrgGnomeMutterInputCaptureSession *session_proxy =
++  OrgHonkHWinInputCaptureSession *session_proxy =
+     gnome_input_capture_session->proxy;
+   g_autoptr(GUnixFDList) in_fd_list = NULL;
+ 
+-  if (!org_gnome_mutter_input_capture_session_call_connect_to_eis_sync (session_proxy,
++  if (!org_honk_hwin_input_capture_session_call_connect_to_eis_sync (session_proxy,
+                                                                         in_fd_list,
+                                                                         fd_variant,
+                                                                         fd_list,
+--- a/src/gnomescreencast.c
++++ b/src/gnomescreencast.c
+@@ -61,7 +61,7 @@
+ 
+   uint32_t id;
+   char *path;
+-  OrgGnomeMutterScreenCastStream *proxy;
++  OrgHonkHWinScreenCastStream *proxy;
+ 
+   uint32_t pipewire_node_id;
+ 
+@@ -86,7 +86,7 @@
+   GObject parent;
+ 
+   char *path;
+-  OrgGnomeMutterScreenCastSession *proxy;
++  OrgHonkHWinScreenCastSession *proxy;
+   gulong closed_handler_id;
+ 
+   GList *streams;
+@@ -105,7 +105,7 @@
+   int api_version;
+ 
+   guint screen_cast_name_watch;
+-  OrgGnomeMutterScreenCast *proxy;
++  OrgHonkHWinScreenCast *proxy;
+ } GnomeScreenCast;
+ 
+ typedef struct _GnomeScreenCastClass
+@@ -169,7 +169,7 @@
+ }
+ 
+ static void
+-on_pipewire_stream_added (OrgGnomeMutterScreenCastStream *stream_proxy,
++on_pipewire_stream_added (OrgHonkHWinScreenCastStream *stream_proxy,
+                           unsigned int arg_node_id,
+                           GnomeScreenCastStream *stream)
+ {
+@@ -293,13 +293,13 @@
+                                          ScreenCastSelection     *select,
+                                          GError                 **error)
+ {
+-  OrgGnomeMutterScreenCastSession *session_proxy =
++  OrgHonkHWinScreenCastSession *session_proxy =
+     gnome_screen_cast_session->proxy;
+   GVariantBuilder properties_builder;
+   GVariant *properties;
+   g_autofree char *stream_path = NULL;
+   GDBusConnection *connection;
+-  OrgGnomeMutterScreenCastStream *stream_proxy;
++  OrgHonkHWinScreenCastStream *stream_proxy;
+   GnomeScreenCastStream *stream;
+   GVariant *parameters;
+ 
+@@ -318,7 +318,7 @@
+     }
+   properties = g_variant_builder_end (&properties_builder);
+ 
+-  if (!org_gnome_mutter_screen_cast_session_call_record_window_sync (session_proxy,
++  if (!org_honk_hwin_screen_cast_session_call_record_window_sync (session_proxy,
+                                                                      properties,
+                                                                      &stream_path,
+                                                                      NULL,
+@@ -327,9 +327,9 @@
+ 
+   connection = g_dbus_proxy_get_connection (G_DBUS_PROXY (session_proxy));
+   stream_proxy =
+-    org_gnome_mutter_screen_cast_stream_proxy_new_sync (connection,
++    org_honk_hwin_screen_cast_stream_proxy_new_sync (connection,
+                                                         G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                        "org.gnome.Mutter.ScreenCast",
++                                                        "org.honk.HWin.ScreenCast",
+                                                         stream_path,
+                                                         NULL,
+                                                         error);
+@@ -343,7 +343,7 @@
+   stream->proxy = stream_proxy;
+   stream->id = id;
+ 
+-  parameters = org_gnome_mutter_screen_cast_stream_get_parameters (stream->proxy);
++  parameters = org_honk_hwin_screen_cast_stream_get_parameters (stream->proxy);
+   if (parameters)
+     {
+       if (g_variant_lookup (parameters, "position", "(ii)",
+@@ -378,13 +378,13 @@
+                                           ScreenCastSelection     *select,
+                                           GError                 **error)
+ {
+-  OrgGnomeMutterScreenCastSession *session_proxy =
++  OrgHonkHWinScreenCastSession *session_proxy =
+     gnome_screen_cast_session->proxy;
+   GVariantBuilder properties_builder;
+   GVariant *properties;
+   g_autofree char *stream_path = NULL;
+   GDBusConnection *connection;
+-  OrgGnomeMutterScreenCastStream *stream_proxy;
++  OrgHonkHWinScreenCastStream *stream_proxy;
+   GnomeScreenCastStream *stream;
+   GVariant *parameters;
+   const char *connector;
+@@ -402,7 +402,7 @@
+   properties = g_variant_builder_end (&properties_builder);
+ 
+   connector = monitor_get_connector (monitor);
+-  if (!org_gnome_mutter_screen_cast_session_call_record_monitor_sync (session_proxy,
++  if (!org_honk_hwin_screen_cast_session_call_record_monitor_sync (session_proxy,
+                                                                       connector,
+                                                                       properties,
+                                                                       &stream_path,
+@@ -412,9 +412,9 @@
+ 
+   connection = g_dbus_proxy_get_connection (G_DBUS_PROXY (session_proxy));
+   stream_proxy =
+-    org_gnome_mutter_screen_cast_stream_proxy_new_sync (connection,
++    org_honk_hwin_screen_cast_stream_proxy_new_sync (connection,
+                                                         G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                        "org.gnome.Mutter.ScreenCast",
++                                                        "org.honk.HWin.ScreenCast",
+                                                         stream_path,
+                                                         NULL,
+                                                         error);
+@@ -428,7 +428,7 @@
+   stream->proxy = stream_proxy;
+   stream->id = id;
+ 
+-  parameters = org_gnome_mutter_screen_cast_stream_get_parameters (stream->proxy);
++  parameters = org_honk_hwin_screen_cast_stream_get_parameters (stream->proxy);
+   if (parameters)
+     {
+       if (g_variant_lookup (parameters, "position", "(ii)",
+@@ -462,13 +462,13 @@
+                                           ScreenCastSelection     *select,
+                                           GError                 **error)
+ {
+-  OrgGnomeMutterScreenCastSession *session_proxy =
++  OrgHonkHWinScreenCastSession *session_proxy =
+     gnome_screen_cast_session->proxy;
+   GVariantBuilder properties_builder;
+   GVariant *properties;
+   g_autofree char *stream_path = NULL;
+   GDBusConnection *connection;
+-  OrgGnomeMutterScreenCastStream *stream_proxy;
++  OrgHonkHWinScreenCastStream *stream_proxy;
+   GnomeScreenCastStream *stream;
+   GVariant *parameters;
+ 
+@@ -484,7 +484,7 @@
+     }
+   properties = g_variant_builder_end (&properties_builder);
+ 
+-  if (!org_gnome_mutter_screen_cast_session_call_record_virtual_sync (session_proxy,
++  if (!org_honk_hwin_screen_cast_session_call_record_virtual_sync (session_proxy,
+                                                                       properties,
+                                                                       &stream_path,
+                                                                       NULL,
+@@ -493,9 +493,9 @@
+ 
+   connection = g_dbus_proxy_get_connection (G_DBUS_PROXY (session_proxy));
+   stream_proxy =
+-    org_gnome_mutter_screen_cast_stream_proxy_new_sync (connection,
++    org_honk_hwin_screen_cast_stream_proxy_new_sync (connection,
+                                                         G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                        "org.gnome.Mutter.ScreenCast",
++                                                        "org.honk.HWin.ScreenCast",
+                                                         stream_path,
+                                                         NULL,
+                                                         error);
+@@ -509,7 +509,7 @@
+   stream->proxy = stream_proxy;
+   stream->id = id;
+ 
+-  parameters = org_gnome_mutter_screen_cast_stream_get_parameters (stream->proxy);
++  parameters = org_honk_hwin_screen_cast_stream_get_parameters (stream->proxy);
+   if (parameters)
+     {
+       if (g_variant_lookup (parameters, "position", "(ii)",
+@@ -584,13 +584,13 @@
+ gnome_screen_cast_session_stop (GnomeScreenCastSession *gnome_screen_cast_session,
+                                 GError **error)
+ {
+-  OrgGnomeMutterScreenCastSession *session_proxy =
++  OrgHonkHWinScreenCastSession *session_proxy =
+     gnome_screen_cast_session->proxy;
+ 
+   g_signal_handler_disconnect (gnome_screen_cast_session->proxy,
+                                gnome_screen_cast_session->closed_handler_id);
+ 
+-  if (!org_gnome_mutter_screen_cast_session_call_stop_sync (session_proxy,
++  if (!org_honk_hwin_screen_cast_session_call_stop_sync (session_proxy,
+                                                             NULL,
+                                                             error))
+     return FALSE;
+@@ -602,10 +602,10 @@
+ gnome_screen_cast_session_start (GnomeScreenCastSession *gnome_screen_cast_session,
+                                  GError **error)
+ {
+-  OrgGnomeMutterScreenCastSession *session_proxy =
++  OrgHonkHWinScreenCastSession *session_proxy =
+     gnome_screen_cast_session->proxy;
+ 
+-  if (!org_gnome_mutter_screen_cast_session_call_start_sync (session_proxy,
++  if (!org_honk_hwin_screen_cast_session_call_start_sync (session_proxy,
+                                                              NULL,
+                                                              error))
+     return FALSE;
+@@ -654,7 +654,7 @@
+ }
+ 
+ static void
+-on_mutter_session_closed (OrgGnomeMutterScreenCastSession *session_proxy,
++on_mutter_session_closed (OrgHonkHWinScreenCastSession *session_proxy,
+                           GnomeScreenCastSession *gnome_screen_cast_session)
+ {
+   g_signal_emit (gnome_screen_cast_session,
+@@ -670,7 +670,7 @@
+   GVariant *properties;
+   g_autofree char *session_path = NULL;
+   GDBusConnection *connection;
+-  OrgGnomeMutterScreenCastSession *session_proxy;
++  OrgHonkHWinScreenCastSession *session_proxy;
+   GnomeScreenCastSession *gnome_screen_cast_session;
+ 
+   g_variant_builder_init (&properties_builder, G_VARIANT_TYPE_VARDICT);
+@@ -681,7 +681,7 @@
+                              g_variant_new_string (remote_desktop_session_id));
+     }
+   properties = g_variant_builder_end (&properties_builder);
+-  if (!org_gnome_mutter_screen_cast_call_create_session_sync (gnome_screen_cast->proxy,
++  if (!org_honk_hwin_screen_cast_call_create_session_sync (gnome_screen_cast->proxy,
+                                                               properties,
+                                                               &session_path,
+                                                               NULL,
+@@ -690,9 +690,9 @@
+ 
+   connection = g_dbus_proxy_get_connection (G_DBUS_PROXY (gnome_screen_cast->proxy));
+   session_proxy =
+-    org_gnome_mutter_screen_cast_session_proxy_new_sync (connection,
++    org_honk_hwin_screen_cast_session_proxy_new_sync (connection,
+                                                          G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                         "org.gnome.Mutter.ScreenCast",
++                                                         "org.honk.HWin.ScreenCast",
+                                                          session_path,
+                                                          NULL,
+                                                          error);
+@@ -727,21 +727,21 @@
+   g_autoptr(GError) error = NULL;
+ 
+   gnome_screen_cast->proxy =
+-    org_gnome_mutter_screen_cast_proxy_new_sync (connection,
++    org_honk_hwin_screen_cast_proxy_new_sync (connection,
+                                                  G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                 "org.gnome.Mutter.ScreenCast",
+-                                                 "/org/gnome/Mutter/ScreenCast",
++                                                 "org.honk.HWin.ScreenCast",
++                                                 "/org/honk/HWin/ScreenCast",
+                                                  NULL,
+                                                  &error);
+   if (!gnome_screen_cast->proxy)
+     {
+-      g_warning ("Failed to acquire org.gnome.Mutter.ScreenCast proxy: %s",
++      g_warning ("Failed to acquire org.honk.HWin.ScreenCast proxy: %s",
+                  error->message);
+       return;
+     }
+ 
+   gnome_screen_cast->api_version =
+-    org_gnome_mutter_screen_cast_get_version (gnome_screen_cast->proxy);
++    org_honk_hwin_screen_cast_get_version (gnome_screen_cast->proxy);
+ 
+   g_signal_emit (gnome_screen_cast, signals[ENABLED], 0);
+ }
+@@ -790,7 +790,7 @@
+   gnome_screen_cast = g_object_new (gnome_screen_cast_get_type (), NULL);
+   gnome_screen_cast->screen_cast_name_watch =
+     g_bus_watch_name (G_BUS_TYPE_SESSION,
+-                      "org.gnome.Mutter.ScreenCast",
++                      "org.honk.HWin.ScreenCast",
+                       G_BUS_NAME_WATCHER_FLAGS_NONE,
+                       gnome_screen_cast_name_appeared,
+                       gnome_screen_cast_name_vanished,
+--- a/src/inputcapture.c
++++ b/src/inputcapture.c
+@@ -71,7 +71,7 @@
+     gboolean clipboard_enabled;
+     gboolean clipboard_requested;
+ 
+-    OrgGnomeMutterClipboard *clipboard_proxy;
++    OrgHonkHWinClipboard *clipboard_proxy;
+   } clipboard;
+ 
+   guint capabilities;
+@@ -423,9 +423,9 @@
+ 
+       mutter_session_path = gnome_input_capture_get_path (gnome_input_capture_session);
+       input_capture_session->clipboard.clipboard_proxy =
+-        org_gnome_mutter_clipboard_proxy_new_sync (impl_connection,
++        org_honk_hwin_clipboard_proxy_new_sync (impl_connection,
+                                                    G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                   "org.gnome.Mutter.InputCapture",
++                                                   "org.honk.HWin.InputCapture",
+                                                    mutter_session_path,
+                                                    NULL,
+                                                    &error);
+@@ -1226,7 +1226,7 @@
+   input_capture_session->clipboard.clipboard_requested = TRUE;
+ }
+ 
+-static OrgGnomeMutterClipboard *
++static OrgHonkHWinClipboard *
+ input_capture_session_get_clipboard_proxy (ClipboardSession *clipboard_session)
+ {
+   InputCaptureSession *input_capture_session =
+--- a/src/remotedesktop.c
++++ b/src/remotedesktop.c
+@@ -58,7 +58,7 @@
+ 
+   char *parent_window;
+   char *mutter_session_path;
+-  OrgGnomeMutterRemoteDesktopSession *mutter_session_proxy;
++  OrgHonkHWinRemoteDesktopSession *mutter_session_proxy;
+   gulong closed_handler_id;
+ 
+   GnomeScreenCastSession *gnome_screen_cast_session;
+@@ -81,7 +81,7 @@
+     gboolean clipboard_enabled;
+     gboolean clipboard_requested;
+ 
+-    OrgGnomeMutterClipboard *clipboard_proxy;
++    OrgHonkHWinClipboard *clipboard_proxy;
+   } clipboard;
+ 
+   RemoteDesktopPersistMode persist_mode;
+@@ -124,7 +124,7 @@
+ static GDBusConnection *impl_connection;
+ static guint remote_desktop_name_watch;
+ static GDBusInterfaceSkeleton *impl;
+-static OrgGnomeMutterRemoteDesktop *remote_desktop;
++static OrgHonkHWinRemoteDesktop *remote_desktop;
+ static GnomeScreenCast *gnome_screen_cast;
+ 
+ static void clipboard_session_init_iface (ClipboardSessionInterface *iface);
+@@ -307,7 +307,7 @@
+ }
+ 
+ static void
+-on_mutter_session_closed (OrgGnomeMutterRemoteDesktopSession *mutter_session_proxy,
++on_mutter_session_closed (OrgHonkHWinRemoteDesktopSession *mutter_session_proxy,
+                           RemoteDesktopSession *remote_desktop_session)
+ {
+   session_close ((Session *)remote_desktop_session, TRUE);
+@@ -318,7 +318,7 @@
+                             const char *session_handle,
+                             const char *peer_name,
+                             const char *mutter_session_path,
+-                            OrgGnomeMutterRemoteDesktopSession *mutter_session_proxy)
++                            OrgHonkHWinRemoteDesktopSession *mutter_session_proxy)
+ {
+   RemoteDesktopSession *remote_desktop_session;
+ 
+@@ -352,7 +352,7 @@
+   g_autofree char *mutter_session_path = NULL;
+   g_autoptr(GError) error = NULL;
+   int response;
+-  OrgGnomeMutterRemoteDesktopSession *mutter_session_proxy = NULL;
++  OrgHonkHWinRemoteDesktopSession *mutter_session_proxy = NULL;
+   Session *session;
+   GVariantBuilder results_builder;
+ 
+@@ -360,7 +360,7 @@
+ 
+   request = request_new (sender, arg_app_id, arg_handle);
+ 
+-  if (!org_gnome_mutter_remote_desktop_call_create_session_sync (remote_desktop,
++  if (!org_honk_hwin_remote_desktop_call_create_session_sync (remote_desktop,
+                                                                  &mutter_session_path,
+                                                                  NULL,
+                                                                  &error))
+@@ -371,9 +371,9 @@
+     }
+ 
+   mutter_session_proxy =
+-    org_gnome_mutter_remote_desktop_session_proxy_new_sync (impl_connection,
++    org_honk_hwin_remote_desktop_session_proxy_new_sync (impl_connection,
+                                                             G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                            "org.gnome.Mutter.RemoteDesktop",
++                                                            "org.honk.HWin.RemoteDesktop",
+                                                             mutter_session_path,
+                                                             NULL,
+                                                             &error);
+@@ -542,9 +542,9 @@
+       g_autoptr (GError) error = NULL;
+ 
+       remote_desktop_session->clipboard.clipboard_proxy =
+-        org_gnome_mutter_clipboard_proxy_new_sync (impl_connection,
++        org_honk_hwin_clipboard_proxy_new_sync (impl_connection,
+                                                    G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                   "org.gnome.Mutter.RemoteDesktop",
++                                                   "org.honk.HWin.RemoteDesktop",
+                                                    remote_desktop_session->mutter_session_path,
+                                                    NULL,
+                                                    &error);
+@@ -613,13 +613,13 @@
+                           GPtrArray             *streams,
+                           GError               **error)
+ {
+-  OrgGnomeMutterRemoteDesktopSession *session_proxy =
++  OrgHonkHWinRemoteDesktopSession *session_proxy =
+     remote_desktop_session->mutter_session_proxy;
+   GnomeScreenCastSession *gnome_screen_cast_session;
+   const char *remote_desktop_session_id;
+ 
+   remote_desktop_session_id =
+-    org_gnome_mutter_remote_desktop_session_get_session_id (session_proxy);
++    org_honk_hwin_remote_desktop_session_get_session_id (session_proxy);
+   gnome_screen_cast_session =
+     gnome_screen_cast_create_session (gnome_screen_cast,
+                                       remote_desktop_session_id,
+@@ -653,7 +653,7 @@
+                gboolean                  persist_allowed,
+                GError                  **error)
+ {
+-  OrgGnomeMutterRemoteDesktopSession *session_proxy;
++  OrgHonkHWinRemoteDesktopSession *session_proxy;
+   gboolean need_streams;
+ 
+   remote_desktop_session->shared.persist_allowed = persist_allowed;
+@@ -673,7 +673,7 @@
+     }
+ 
+   session_proxy = remote_desktop_session->mutter_session_proxy;
+-  if (!org_gnome_mutter_remote_desktop_session_call_start_sync (session_proxy,
++  if (!org_honk_hwin_remote_desktop_session_call_start_sync (session_proxy,
+                                                                 NULL,
+                                                                 error))
+     return FALSE;
+@@ -809,13 +809,13 @@
+                               double dy)
+ {
+   RemoteDesktopSession *remote_desktop_session;
+-  OrgGnomeMutterRemoteDesktopSession *proxy;
++  OrgHonkHWinRemoteDesktopSession *proxy;
+ 
+   remote_desktop_session =
+     (RemoteDesktopSession *)lookup_session (arg_session_handle);
+   proxy = remote_desktop_session->mutter_session_proxy;
+ 
+-  org_gnome_mutter_remote_desktop_session_call_notify_pointer_motion_relative (proxy,
++  org_honk_hwin_remote_desktop_session_call_notify_pointer_motion_relative (proxy,
+                                                                                dx, dy,
+                                                                                NULL, NULL, NULL);
+ 
+@@ -834,7 +834,7 @@
+ {
+   RemoteDesktopSession *remote_desktop_session;
+   GnomeScreenCastSession *gnome_screen_cast_session;
+-  OrgGnomeMutterRemoteDesktopSession *proxy;
++  OrgHonkHWinRemoteDesktopSession *proxy;
+   const char *stream_path;
+ 
+   remote_desktop_session =
+@@ -844,7 +844,7 @@
+ 
+   stream_path = gnome_screen_cast_session_get_stream_path_from_id (gnome_screen_cast_session,
+                                                                    stream);
+-  org_gnome_mutter_remote_desktop_session_call_notify_pointer_motion_absolute (proxy,
++  org_honk_hwin_remote_desktop_session_call_notify_pointer_motion_absolute (proxy,
+                                                                                stream_path,
+                                                                                x, y,
+                                                                                NULL, NULL, NULL);
+@@ -862,13 +862,13 @@
+                               uint32_t state)
+ {
+   RemoteDesktopSession *remote_desktop_session;
+-  OrgGnomeMutterRemoteDesktopSession *proxy;
++  OrgHonkHWinRemoteDesktopSession *proxy;
+ 
+   remote_desktop_session =
+     (RemoteDesktopSession *)lookup_session (arg_session_handle);
+   proxy = remote_desktop_session->mutter_session_proxy;
+ 
+-  org_gnome_mutter_remote_desktop_session_call_notify_pointer_button (proxy,
++  org_honk_hwin_remote_desktop_session_call_notify_pointer_button (proxy,
+                                                                       button, state,
+                                                                       NULL, NULL, NULL);
+ 
+@@ -885,7 +885,7 @@
+                             double dy)
+ {
+   RemoteDesktopSession *remote_desktop_session;
+-  OrgGnomeMutterRemoteDesktopSession *proxy;
++  OrgHonkHWinRemoteDesktopSession *proxy;
+   gboolean finish;
+   unsigned int flags = 0;
+ 
+@@ -899,7 +899,7 @@
+         flags = GNOME_REMOTE_DESKTOP_NOTIFY_AXIS_FLAGS_FINISH;
+     }
+ 
+-  org_gnome_mutter_remote_desktop_session_call_notify_pointer_axis (proxy,
++  org_honk_hwin_remote_desktop_session_call_notify_pointer_axis (proxy,
+                                                                     dx, dy, flags,
+                                                                     NULL, NULL, NULL);
+ 
+@@ -916,13 +916,13 @@
+                                      int32_t steps)
+ {
+   RemoteDesktopSession *remote_desktop_session;
+-  OrgGnomeMutterRemoteDesktopSession *proxy;
++  OrgHonkHWinRemoteDesktopSession *proxy;
+ 
+   remote_desktop_session =
+     (RemoteDesktopSession *)lookup_session (arg_session_handle);
+   proxy = remote_desktop_session->mutter_session_proxy;
+ 
+-  org_gnome_mutter_remote_desktop_session_call_notify_pointer_axis_discrete (proxy,
++  org_honk_hwin_remote_desktop_session_call_notify_pointer_axis_discrete (proxy,
+                                                                              axis, steps,
+                                                                              NULL, NULL, NULL);
+ 
+@@ -939,13 +939,13 @@
+                                 uint32_t state)
+ {
+   RemoteDesktopSession *remote_desktop_session;
+-  OrgGnomeMutterRemoteDesktopSession *proxy;
++  OrgHonkHWinRemoteDesktopSession *proxy;
+ 
+   remote_desktop_session =
+     (RemoteDesktopSession *)lookup_session (arg_session_handle);
+   proxy = remote_desktop_session->mutter_session_proxy;
+ 
+-  org_gnome_mutter_remote_desktop_session_call_notify_keyboard_keycode (proxy,
++  org_honk_hwin_remote_desktop_session_call_notify_keyboard_keycode (proxy,
+                                                                         keycode, state,
+                                                                         NULL, NULL, NULL);
+ 
+@@ -962,13 +962,13 @@
+                                uint32_t state)
+ {
+   RemoteDesktopSession *remote_desktop_session;
+-  OrgGnomeMutterRemoteDesktopSession *proxy;
++  OrgHonkHWinRemoteDesktopSession *proxy;
+ 
+   remote_desktop_session =
+     (RemoteDesktopSession *)lookup_session (arg_session_handle);
+   proxy = remote_desktop_session->mutter_session_proxy;
+ 
+-  org_gnome_mutter_remote_desktop_session_call_notify_keyboard_keysym (proxy,
++  org_honk_hwin_remote_desktop_session_call_notify_keyboard_keysym (proxy,
+                                                                        keysym, state,
+                                                                        NULL, NULL, NULL);
+ 
+@@ -988,7 +988,7 @@
+ {
+   RemoteDesktopSession *remote_desktop_session;
+   GnomeScreenCastSession *gnome_screen_cast_session;
+-  OrgGnomeMutterRemoteDesktopSession *proxy;
++  OrgHonkHWinRemoteDesktopSession *proxy;
+   const char *stream_path;
+ 
+   remote_desktop_session =
+@@ -998,7 +998,7 @@
+ 
+   stream_path = gnome_screen_cast_session_get_stream_path_from_id (gnome_screen_cast_session,
+                                                                    stream);
+-  org_gnome_mutter_remote_desktop_session_call_notify_touch_down (proxy,
++  org_honk_hwin_remote_desktop_session_call_notify_touch_down (proxy,
+                                                                   stream_path,
+                                                                   slot,
+                                                                   x, y,
+@@ -1020,7 +1020,7 @@
+ {
+   RemoteDesktopSession *remote_desktop_session;
+   GnomeScreenCastSession *gnome_screen_cast_session;
+-  OrgGnomeMutterRemoteDesktopSession *proxy;
++  OrgHonkHWinRemoteDesktopSession *proxy;
+   const char *stream_path;
+ 
+   remote_desktop_session =
+@@ -1030,7 +1030,7 @@
+ 
+   stream_path = gnome_screen_cast_session_get_stream_path_from_id (gnome_screen_cast_session,
+                                                                    stream);
+-  org_gnome_mutter_remote_desktop_session_call_notify_touch_motion (proxy,
++  org_honk_hwin_remote_desktop_session_call_notify_touch_motion (proxy,
+                                                                     stream_path,
+                                                                     slot,
+                                                                     x, y,
+@@ -1048,13 +1048,13 @@
+                         uint32_t slot)
+ {
+   RemoteDesktopSession *remote_desktop_session;
+-  OrgGnomeMutterRemoteDesktopSession *proxy;
++  OrgHonkHWinRemoteDesktopSession *proxy;
+ 
+   remote_desktop_session =
+     (RemoteDesktopSession *)lookup_session (arg_session_handle);
+   proxy = remote_desktop_session->mutter_session_proxy;
+ 
+-  org_gnome_mutter_remote_desktop_session_call_notify_touch_up (proxy,
++  org_honk_hwin_remote_desktop_session_call_notify_touch_up (proxy,
+                                                                 slot,
+                                                                 NULL, NULL, NULL);
+ 
+@@ -1070,7 +1070,7 @@
+                        GVariant *arg_options)
+ {
+   RemoteDesktopSession *remote_desktop_session;
+-  OrgGnomeMutterRemoteDesktopSession *proxy;
++  OrgHonkHWinRemoteDesktopSession *proxy;
+   g_autoptr(GError) error = NULL;
+   g_autoptr(GUnixFDList) in_fd_list = NULL;
+   g_autoptr(GUnixFDList) out_fd_list = NULL;
+@@ -1087,7 +1087,7 @@
+                          g_variant_new_uint32 (remote_desktop_session->shared.device_types));
+   options = g_variant_builder_end (&options_builder);
+ 
+-  if (!org_gnome_mutter_remote_desktop_session_call_connect_to_eis_sync (proxy,
++  if (!org_honk_hwin_remote_desktop_session_call_connect_to_eis_sync (proxy,
+                                                                          options,
+                                                                          in_fd_list,
+                                                                          &out_fd,
+@@ -1134,15 +1134,15 @@
+   unsigned int supported_device_types;
+ 
+   remote_desktop =
+-    org_gnome_mutter_remote_desktop_proxy_new_sync (impl_connection,
++    org_honk_hwin_remote_desktop_proxy_new_sync (impl_connection,
+                                                     G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                    "org.gnome.Mutter.RemoteDesktop",
+-                                                    "/org/gnome/Mutter/RemoteDesktop",
++                                                    "org.honk.HWin.RemoteDesktop",
++                                                    "/org/honk/HWin/RemoteDesktop",
+                                                     NULL,
+                                                     &error);
+   if (!remote_desktop)
+     {
+-      g_warning ("Failed to acquire org.gnome.Mutter.RemoteDesktop proxy: %s",
++      g_warning ("Failed to acquire org.honk.HWin.RemoteDesktop proxy: %s",
+                  error->message);
+       return;
+     }
+@@ -1181,7 +1181,7 @@
+                     G_CALLBACK (handle_connect_to_eis), NULL);
+ 
+   supported_device_types =
+-    org_gnome_mutter_remote_desktop_get_supported_device_types (remote_desktop);
++    org_honk_hwin_remote_desktop_get_supported_device_types (remote_desktop);
+   g_object_set (G_OBJECT (impl),
+                 "available-device-types",
+                 gnome_device_types_xdp_device_types (supported_device_types),
+@@ -1222,7 +1222,7 @@
+   gnome_screen_cast = gnome_screen_cast_new (connection);
+ 
+   remote_desktop_name_watch = g_bus_watch_name (G_BUS_TYPE_SESSION,
+-                                                "org.gnome.Mutter.RemoteDesktop",
++                                                "org.honk.HWin.RemoteDesktop",
+                                                 G_BUS_NAME_WATCHER_FLAGS_NONE,
+                                                 remote_desktop_name_appeared,
+                                                 remote_desktop_name_vanished,
+@@ -1241,7 +1241,7 @@
+   remote_desktop_session->clipboard.clipboard_requested = TRUE;
+ }
+ 
+-static OrgGnomeMutterClipboard *
++static OrgHonkHWinClipboard *
+ remote_desktop_session_get_clipboard_proxy (ClipboardSession *clipboard_session)
+ {
+   RemoteDesktopSession *remote_desktop_session =
+@@ -1261,7 +1261,7 @@
+ remote_desktop_session_close (Session *session)
+ {
+   RemoteDesktopSession *remote_desktop_session = (RemoteDesktopSession *)session;
+-  OrgGnomeMutterRemoteDesktopSession *session_proxy;
++  OrgHonkHWinRemoteDesktopSession *session_proxy;
+   GnomeScreenCastSession *gnome_screen_cast_session;
+   g_autoptr(GError) error = NULL;
+ 
+@@ -1280,7 +1280,7 @@
+   if (remote_desktop_session->clipboard.clipboard_enabled)
+     clipboard_remove_session (CLIPBOARD_SESSION (session));
+ 
+-  if (!org_gnome_mutter_remote_desktop_session_call_stop_sync (session_proxy,
++  if (!org_honk_hwin_remote_desktop_session_call_stop_sync (session_proxy,
+                                                                NULL,
+                                                                &error))
+     {
+--- a/src/screenshot.c
++++ b/src/screenshot.c
+@@ -23,7 +23,7 @@
+ #include "request.h"
+ #include "utils.h"
+ 
+-static OrgGnomeShellScreenshot *shell;
++static OrgHonkShellScreenshot *shell;
+ 
+ typedef struct {
+   XdpImplScreenshot *impl;
+@@ -155,7 +155,7 @@
+ 
+   handle->response = 0;
+ 
+-  org_gnome_shell_screenshot_call_interactive_screenshot_finish (shell,
++  org_honk_shell_screenshot_call_interactive_screenshot_finish (shell,
+                                                                  &success,
+                                                                  &uri,
+                                                                  result,
+@@ -215,7 +215,7 @@
+ 
+   if (interactive)
+     {
+-      org_gnome_shell_screenshot_call_interactive_screenshot (shell, NULL,
++      org_honk_shell_screenshot_call_interactive_screenshot (shell, NULL,
+                                                               interactive_screenshot_taken_cb,
+                                                               handle);
+     }
+@@ -281,7 +281,7 @@
+   handle->response = 0;
+   handle->red = handle->green = handle->blue = 0;
+ 
+-  if (!org_gnome_shell_screenshot_call_pick_color_finish (shell, &result, res, &error))
++  if (!org_honk_shell_screenshot_call_pick_color_finish (shell, &result, res, &error))
+     {
+       if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+         {
+@@ -334,7 +334,7 @@
+ 
+   request_export (request, g_dbus_method_invocation_get_connection (invocation));
+ 
+-  org_gnome_shell_screenshot_call_pick_color (shell, NULL, color_picked, handle);
++  org_honk_shell_screenshot_call_pick_color (shell, NULL, color_picked, handle);
+ 
+   return TRUE;
+ }
+@@ -357,10 +357,10 @@
+                                          error))
+     return FALSE;
+ 
+-  shell = org_gnome_shell_screenshot_proxy_new_sync (bus,
++  shell = org_honk_shell_screenshot_proxy_new_sync (bus,
+                                                      G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+-                                                     "org.gnome.Shell.Screenshot",
+-                                                     "/org/gnome/Shell/Screenshot",
++                                                     "org.honk.Shell.Screenshot",
++                                                     "/org/honk/Shell/Screenshot",
+                                                      NULL,
+                                                      error);
+   if (shell == NULL)
+--- a/src/screenshotdialog.c
++++ b/src/screenshotdialog.c
+@@ -31,7 +31,7 @@
+ 
+   guint timeout;
+ 
+-  OrgGnomeShellScreenshot *shell;
++  OrgHonkShellScreenshot *shell;
+   GCancellable *cancellable;
+   gboolean skip_dialog;
+ };
+@@ -159,7 +159,7 @@
+   g_autofree char *filename = NULL;
+   g_autoptr(GError) error = NULL;
+ 
+-  if (!org_gnome_shell_screenshot_call_screenshot_finish (dialog->shell,
++  if (!org_honk_shell_screenshot_call_screenshot_finish (dialog->shell,
+                                                           &success,
+                                                           &filename,
+                                                           result,
+@@ -182,7 +182,7 @@
+   g_autofree char *filename = NULL;
+   g_autoptr(GError) error = NULL;
+ 
+-  if (!org_gnome_shell_screenshot_call_screenshot_window_finish (dialog->shell,
++  if (!org_honk_shell_screenshot_call_screenshot_window_finish (dialog->shell,
+                                                                  &success,
+                                                                  &filename,
+                                                                  result,
+@@ -205,7 +205,7 @@
+   g_autofree char *filename = NULL;
+   g_autoptr(GError) error = NULL;
+ 
+-  if (!org_gnome_shell_screenshot_call_screenshot_area_finish (dialog->shell,
++  if (!org_honk_shell_screenshot_call_screenshot_area_finish (dialog->shell,
+                                                                &success,
+                                                                &filename,
+                                                                result,
+@@ -245,7 +245,7 @@
+ 
+   if (strcmp (kind, "screen") == 0)
+     {
+-      org_gnome_shell_screenshot_call_screenshot (dialog->shell,
++      org_honk_shell_screenshot_call_screenshot (dialog->shell,
+                                                   include_pointer,
+                                                   TRUE,
+                                                   "Screenshot",
+@@ -255,7 +255,7 @@
+     }
+   else if (strcmp (kind, "window") == 0)
+     {
+-      org_gnome_shell_screenshot_call_screenshot_window (dialog->shell,
++      org_honk_shell_screenshot_call_screenshot_window (dialog->shell,
+                                                          include_border,
+                                                          include_pointer,
+                                                          TRUE,
+@@ -283,7 +283,7 @@
+   g_autoptr(GError) error = NULL;
+   gint x, y, w, h;
+ 
+-  if (!org_gnome_shell_screenshot_call_select_area_finish (dialog->shell,
++  if (!org_honk_shell_screenshot_call_select_area_finish (dialog->shell,
+                                                            &x, &y, &w, &h,
+                                                            result,
+                                                            &error))
+@@ -292,7 +292,7 @@
+       return;
+     }
+ 
+-  org_gnome_shell_screenshot_call_screenshot_area (dialog->shell,
++  org_honk_shell_screenshot_call_screenshot_area (dialog->shell,
+                                                    x, y, w, h,
+                                                    TRUE,
+                                                    "Screenshot",
+@@ -316,7 +316,7 @@
+ 
+   if (strcmp (kind, "area") == 0)
+     {
+-      org_gnome_shell_screenshot_call_select_area (dialog->shell,
++      org_honk_shell_screenshot_call_select_area (dialog->shell,
+                                                    dialog->cancellable,
+                                                    select_area_done,
+                                                    dialog);
+@@ -412,7 +412,7 @@
+ ScreenshotDialog *
+ screenshot_dialog_new (const char *app_id,
+                        gboolean permission_store_checked,
+-                       OrgGnomeShellScreenshot *shell)
++                       OrgHonkShellScreenshot *shell)
+ {
+   g_autoptr(GtkWindowGroup) window_group = NULL;
+   ScreenshotDialog *dialog;
+--- a/src/screenshotdialog.h
++++ b/src/screenshotdialog.h
+@@ -11,6 +11,6 @@
+ 
+ ScreenshotDialog * screenshot_dialog_new (const char *app_id,
+                                           gboolean permission_store_checked,
+-                                          OrgGnomeShellScreenshot *shell);
++                                          OrgHonkShellScreenshot *shell);
+ 
+ G_END_DECLS
+--- a/src/shellintrospect.c
++++ b/src/shellintrospect.c
+@@ -38,7 +38,7 @@
+   guint shell_introspect_watch_name_id;
+   GCancellable *cancellable;
+ 
+-  OrgGnomeShellIntrospect *proxy;
++  OrgHonkShellIntrospect *proxy;
+ 
+   unsigned int version;
+ 
+@@ -313,7 +313,7 @@
+   g_clear_object (&shell_introspect->cancellable);
+   shell_introspect->cancellable = g_cancellable_new ();
+ 
+-  if (!org_gnome_shell_introspect_call_get_windows_sync (shell_introspect->proxy,
++  if (!org_honk_shell_introspect_call_get_windows_sync (shell_introspect->proxy,
+                                                          &windows_variant,
+                                                          shell_introspect->cancellable,
+                                                          &error))
+@@ -342,7 +342,7 @@
+   gboolean animations_enabled;
+ 
+   animations_enabled =
+-    org_gnome_shell_introspect_get_animations_enabled (shell_introspect->proxy);
++    org_honk_shell_introspect_get_animations_enabled (shell_introspect->proxy);
+   if (shell_introspect->animations_enabled_valid &&
+       animations_enabled == shell_introspect->animations_enabled)
+     return;
+@@ -366,14 +366,14 @@
+                                     gpointer      user_data)
+ {
+   ShellIntrospect *shell_introspect = user_data;
+-  OrgGnomeShellIntrospect *proxy;
++  OrgHonkShellIntrospect *proxy;
+   g_autoptr(GError) error = NULL;
+ 
+-  proxy = org_gnome_shell_introspect_proxy_new_for_bus_finish (result,
++  proxy = org_honk_shell_introspect_proxy_new_for_bus_finish (result,
+                                                                &error);
+   if (!proxy)
+     {
+-      g_warning ("Failed to acquire org.gnome.Shell.Introspect proxy: %s",
++      g_warning ("Failed to acquire org.honk.Shell.Introspect proxy: %s",
+                  error->message);
+       return;
+     }
+@@ -388,7 +388,7 @@
+     sync_state (shell_introspect);
+ 
+   shell_introspect->version =
+-    org_gnome_shell_introspect_get_version (shell_introspect->proxy);
++    org_honk_shell_introspect_get_version (shell_introspect->proxy);
+ 
+   if (shell_introspect->version >= 2)
+     {
+@@ -407,10 +407,10 @@
+ {
+   ShellIntrospect *shell_introspect = user_data;
+ 
+-  org_gnome_shell_introspect_proxy_new_for_bus (G_BUS_TYPE_SESSION,
++  org_honk_shell_introspect_proxy_new_for_bus (G_BUS_TYPE_SESSION,
+                                                 G_DBUS_PROXY_FLAGS_NONE,
+-                                                "org.gnome.Shell.Introspect",
+-                                                "/org/gnome/Shell/Introspect",
++                                                "org.honk.Shell.Introspect",
++                                                "/org/honk/Shell/Introspect",
+                                                 shell_introspect->cancellable,
+                                                 on_shell_introspect_proxy_acquired,
+                                                 shell_introspect);
+@@ -465,7 +465,7 @@
+   shell_introspect = g_object_new (shell_introspect_get_type (), NULL);
+   shell_introspect->shell_introspect_watch_name_id =
+     g_bus_watch_name (G_BUS_TYPE_SESSION,
+-                      "org.gnome.Shell.Introspect",
++                      "org.honk.Shell.Introspect",
+                       G_BUS_NAME_WATCHER_FLAGS_NONE,
+                       on_shell_introspect_name_appeared,
+                       on_shell_introspect_name_vanished,
+--- a/subprojects/libgxdp/data/mutter-x11-interop.xml
++++ b/subprojects/libgxdp/data/mutter-x11-interop.xml
+@@ -1,11 +1,11 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+-<protocol name="mutter_x11_interop">
++<protocol name="hwin_x11_interop">
+   <description summary="X11 interoperability helper">
+     This protocol is intended to be used by the portal backend to map Wayland
+     dialogs as modal dialogs on top of X11 windows.
+   </description>
+ 
+-  <interface name="mutter_x11_interop" version="1">
++  <interface name="hwin_x11_interop" version="1">
+     <description summary="X11 interoperability helper"/>
+ 
+     <request name="destroy" type="destructor"/>
+--- a/subprojects/libgxdp/data/org.gnome.Mutter.ServiceChannel.xml
++++ b/subprojects/libgxdp/data/org.gnome.Mutter.ServiceChannel.xml
+@@ -3,7 +3,7 @@
+ 'http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd'>
+ <node>
+ 
+-  <interface name="org.gnome.Mutter.ServiceChannel">
++  <interface name="org.honk.HWin.ServiceChannel">
+ 
+     <!--
+         ServiceClientTypes:
+--- a/subprojects/libgxdp/src/gxdp-wayland.c
++++ b/subprojects/libgxdp/src/gxdp-wayland.c
+@@ -27,7 +27,7 @@
+ #include "mutter-x11-interop-client-protocol.h"
+ #include "gxdp-dbus.h"
+ 
+-static struct mutter_x11_interop *x11_interop = NULL;
++static struct hwin_x11_interop *x11_interop = NULL;
+ 
+ static void
+ handle_registry_global (void               *user_data,
+@@ -36,12 +36,12 @@
+                         const char         *interface,
+                         uint32_t            version)
+ {
+-  struct mutter_x11_interop **x11_interop_ptr = user_data;
+-
+-  if (strcmp (interface, mutter_x11_interop_interface.name) == 0)
++  struct hwin_x11_interop **x11_interop_ptr = user_data;
++
++  if (strcmp (interface, hwin_x11_interop_interface.name) == 0)
+     {
+       *x11_interop_ptr = wl_registry_bind (registry, id,
+-                                           &mutter_x11_interop_interface, 1);
++                                           &hwin_x11_interop_interface, 1);
+     }
+ }
+ 
+@@ -227,19 +227,19 @@
+                    GError                **error)
+ {
+   g_autoptr(GError) local_error = NULL;
+-  g_autoptr(GxdpDBusMutterServiceChannel) proxy = NULL;
++  g_autoptr(GxdpDBusHWinServiceChannel) proxy = NULL;
+   g_autoptr(GVariant) fd_variant = NULL;
+   g_autoptr(GUnixFDList) fd_list = NULL;
+   int fd;
+   g_autofree char *fd_str = NULL;
+ 
+-  proxy = gxdp_dbus_mutter_service_channel_proxy_new_for_bus_sync (
++  proxy = gxdp_dbus_hwin_service_channel_proxy_new_for_bus_sync (
+     G_BUS_TYPE_SESSION,
+     (G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START |
+      G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES |
+      G_DBUS_PROXY_FLAGS_DO_NOT_CONNECT_SIGNALS),
+-    "org.gnome.Mutter.ServiceChannel",
+-    "/org/gnome/Mutter/ServiceChannel",
++    "org.honk.HWin.ServiceChannel",
++    "/org/honk/HWin/ServiceChannel",
+     NULL, &local_error);
+   if (!proxy)
+     {
+@@ -249,7 +249,7 @@
+       return init_gtk_wayland_fallback (error);
+     }
+ 
+-  if (!gxdp_dbus_mutter_service_channel_call_open_wayland_service_connection_sync (
++  if (!gxdp_dbus_hwin_service_channel_call_open_wayland_service_connection_sync (
+         proxy,
+         service_client_type,
+         NULL,
+@@ -305,5 +305,5 @@
+   g_return_if_fail (dialog_surface);
+ 
+   wl_surface = gdk_wayland_surface_get_wl_surface (dialog_surface);
+-  mutter_x11_interop_set_x11_parent (x11_interop, wl_surface, parent_xid);
+-}
++  hwin_x11_interop_set_x11_parent (x11_interop, wl_surface, parent_xid);
++}
+--- a/subprojects/libgxdp/src/meson.build
++++ b/subprojects/libgxdp/src/meson.build
+@@ -52,7 +52,7 @@
+       'gxdp-dbus',
+       sources: dbus_interfaces,
+       namespace: 'GxdpDBus',
+-      interface_prefix: 'org.gnome.',
++      interface_prefix: 'org.honk.',
+     )
+ 
+     built_sources += [client_header, protocol_code]

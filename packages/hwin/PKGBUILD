@@ -1,0 +1,137 @@
+# shellcheck shell=bash
+# Independent component built from one pinned Honk commit.
+# shellcheck disable=SC2034,SC2154
+_commit=2e1041b240256c733481f3732b3b790a1b2203d9
+pkgname=hwin
+# The public Git history replaces the former private snapshot history.
+epoch=2
+pkgver=r8.g2e1041b24025
+pkgrel=1
+pkgdesc='HWin window manager and compositor with native tiling'
+arch=('x86_64')
+url='https://github.com/simoltos/honk'
+groups=('honk')
+license=('GPL-2.0-or-later' 'GPL-3.0-only' 'LGPL-2.1-or-later' 'CC-BY-SA-4.0')
+depends=(
+    'at-spi2-core'
+    'cairo'
+    'colord'
+    'dconf'
+    'egl-wayland'
+    'fontconfig'
+    'fribidi'
+    'glib2>=2.86.0'
+    'glibc'
+    'glycin>=2.0'
+    'gnome-desktop-4'
+    'gnome-settings-daemon'
+    'graphene'
+    'gsettings-desktop-schemas>=51.rc'
+    'gtk4'
+    'harfbuzz'
+    'iio-sensor-proxy'
+    'lcms2'
+    'libcanberra-pulse'
+    'libcolord'
+    'libdisplay-info'
+    'libdrm'
+    'libei>=1.3.901'
+    'libgcc'
+    'libgirepository'
+    'libglvnd'
+    'libgudev'
+    'libinput>=1.31.0'
+    'libpipewire>=1:1.6.0'
+    'libsysprof-capture'
+    'libwacom'
+    'libx11'
+    'libxau'
+    'libxcb'
+    'libxcomposite'
+    'libxcursor'
+    'libxdamage'
+    'libxext'
+    'libxfixes'
+    'libxi'
+    'libxinerama'
+    'libxkbcommon'
+    'libxrandr'
+    'mesa'
+    'pango'
+    'pipewire'
+    'pixman'
+    'python'
+    'python-argcomplete'
+    'python-dbus'
+    'python-gobject'
+    'startup-notification'
+    'systemd-libs'
+    'wayland>=1.26'
+    'xkeyboard-config'
+    'xorg-xwayland'
+    'honk-desktop-51'
+    'honk-settings-daemon-51'
+)
+makedepends=(
+    'git'
+    'glib2-devel'
+    'gobject-introspection'
+    'meson'
+    'ninja'
+    'pkgconf'
+    'bash-completion'
+    'sysprof'
+    'wayland-protocols>=1.48'
+)
+provides=(
+    'libhwin-51.so'
+)
+conflicts=(
+    'honk'
+    'gnome-tiling'
+    'mutter'
+)
+replaces=(
+    'honk'
+    'gnome-tiling'
+)
+source=(
+    "honk-$_commit.tar.gz::https://codeload.github.com/simoltos/honk/tar.gz/$_commit"
+    'https://gitlab.gnome.org/GNOME/gvdb/-/archive/b54bc5da25127ef416858a3ad92e57159ff565b3/gvdb-b54bc5da25127ef416858a3ad92e57159ff565b3.tar.gz'
+)
+sha256sums=(
+    '620e666bd9ca0640eb1b33afbd2dcc00474c15fcd07063e1d838ee0e51f5d131'
+    'ecc3ec39db8c301dce9bb24d8dcbab3360e42f6ce723a772f2f4acd53ad0a5a4'
+)
+
+prepare() {
+    printf '{\n  "package": "%s",\n  "version": "%s",\n  "git_revision": "%s",\n  "working_tree_modified": false,\n  "source_archive_sha256": "%s"\n}\n' \
+        "$pkgname" "$epoch:$pkgver-$pkgrel" "$_commit" "${sha256sums[0]}" > "$srcdir/source.json"
+    local tree="$srcdir/honk-$_commit"
+    printf '%s\n' "$pkgver" > "$tree/SOURCE_VERSION"
+    if [[ ! -d $tree/hwin/subprojects/gvdb ]]; then
+        grep -Eq '^revision[[:space:]]*=[[:space:]]*b54bc5da25127ef416858a3ad92e57159ff565b3$' "$tree/hwin/subprojects/gvdb.wrap"
+        cp -a "$srcdir/gvdb-b54bc5da25127ef416858a3ad92e57159ff565b3" "$tree/hwin/subprojects/gvdb"
+    fi
+}
+
+build() {
+    meson setup build "$srcdir/honk-$_commit/hwin" \
+        --prefix=/usr --libdir=lib --libexecdir=lib --sysconfdir=/etc \
+        --localstatedir=/var --buildtype=release --wrap-mode=nodownload \
+        -Db_lto=true -Dwerror=false \
+        -Dtests=disabled -Dinstalled_tests=false -Ddevkit=disabled -Dintrospection=true -Dprofiler=true -Dxwayland=true -Dremote_desktop=true -Dfonts=true
+    meson compile -C build -j3
+}
+
+package() {
+    local component notice
+    DESTDIR="$pkgdir" meson install -C build --no-rebuild
+    install -Dm644 "$srcdir/source.json" "$pkgdir/usr/share/$pkgname/source.json"
+    for component in hwin hwin/subprojects/gvdb; do
+        for notice in "$srcdir/honk-$_commit/$component"/{COPYING,LICENSE}*; do
+            [[ -f $notice ]] || continue
+            install -Dm644 "$notice" "$pkgdir/usr/share/licenses/$pkgname/$component/${notice##*/}"
+        done
+    done
+}

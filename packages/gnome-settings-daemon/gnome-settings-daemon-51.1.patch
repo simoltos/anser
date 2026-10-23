@@ -1,0 +1,3469 @@
+--- a/data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in
++++ b/data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in
+@@ -28,15 +28,5 @@
+       <summary>Minimum notify period for repeated warnings</summary>
+       <description>Specify a time in minutes. Subsequent warnings for a volume will not appear more often than this period.</description>
+     </key>
+-    <key name="donation-reminder-enabled" type="b">
+-      <default>true</default>
+-      <summary>Whether donation reminders are enabled</summary>
+-      <description>Enables or disables the low-frequency donation reminder notification.</description>
+-    </key>
+-    <key name="donation-reminder-last-shown" type="x">
+-      <default>0</default>
+-      <summary>Last time the donation reminder was shown</summary>
+-      <description>Timestamp for the last time a donation reminder was shown.</description>
+-    </key>
+   </schema>
+ </schemalist>
+--- a/gnome-settings-daemon/gnome-settings-bus.c
++++ b/gnome-settings-daemon/gnome-settings-bus.c
+@@ -35,11 +35,11 @@
+ #define GNOME_SCREENSAVER_DBUS_NAME      "org.gnome.ScreenSaver"
+ #define GNOME_SCREENSAVER_DBUS_OBJECT    "/org/gnome/ScreenSaver"
+ 
+-#define GNOME_SHELL_DBUS_NAME      "org.gnome.Shell"
+-#define GNOME_SHELL_DBUS_OBJECT    "/org/gnome/Shell"
++#define GNOME_SHELL_DBUS_NAME      "org.honk.Shell"
++#define GNOME_SHELL_DBUS_OBJECT    "/org/honk/Shell"
+ 
+-#define MUTTER_DISPLAY_CONFIG_DBUS_NAME      "org.gnome.Mutter.DisplayConfig"
+-#define MUTTER_DISPLAY_CONFIG_DBUS_OBJECT    "/org/gnome/Mutter/DisplayConfig"
++#define MUTTER_DISPLAY_CONFIG_DBUS_NAME      "org.honk.HWin.DisplayConfig"
++#define MUTTER_DISPLAY_CONFIG_DBUS_OBJECT    "/org/honk/HWin/DisplayConfig"
+ 
+ GsdSessionManager *
+ gnome_settings_bus_get_session_proxy (void)
+--- a/gnome-settings-daemon/meson.build
++++ b/gnome-settings-daemon/meson.build
+@@ -15,14 +15,20 @@
+ 
+ foreach iface: dbus_ifaces
+   name = 'org.gnome.' + iface[0]
++  interface_name = name
++  if iface[0] == 'Shell'
++    interface_name = 'org.honk.Shell'
++  elif iface[0] == 'Mutter.DisplayConfig'
++    interface_name = 'org.honk.HWin.DisplayConfig'
++  endif
+   c_name = iface[2]
+ 
+   dbus_sources = gnome.gdbus_codegen(
+     iface[1],
+     name + '.xml',
+-    interface_prefix: name + '.',
++    interface_prefix: interface_name + '.',
+     namespace: 'Gsd',
+-    annotations: [name, 'org.gtk.GDBus.C.Name', iface[2]]
++    annotations: [interface_name, 'org.gtk.GDBus.C.Name', iface[2]]
+   )
+ 
+   sources += dbus_sources[0]
+--- a/gnome-settings-daemon/org.gnome.Mutter.DisplayConfig.xml
++++ b/gnome-settings-daemon/org.gnome.Mutter.DisplayConfig.xml
+@@ -3,14 +3,14 @@
+ 'http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd'>
+ <node>
+   <!--
+-      org.gnome.Mutter.DisplayConfig:
++      org.honk.HWin.DisplayConfig:
+       @short_description: display configuration interface
+ 
+       This interface is used by mutter and gnome-settings-daemon
+       to apply multiple monitor configuration.
+   -->
+ 
+-  <interface name="org.gnome.Mutter.DisplayConfig">
++  <interface name="org.honk.HWin.DisplayConfig">
+ 
+     <!--
+         GetResources:
+--- a/gnome-settings-daemon/org.gnome.Shell.xml
++++ b/gnome-settings-daemon/org.gnome.Shell.xml
+@@ -21,11 +21,11 @@
+ 
+ <node name="/" xmlns:doc="http://www.freedesktop.org/dbus/1.0/doc.dtd">
+   <!--
+-      org.gnome.Shell:
++      org.honk.Shell:
+ 
+       An interface used to request shell features.
+   -->
+-  <interface name="org.gnome.Shell">
++  <interface name="org.honk.Shell">
+     <method name="FocusSearch"/>
+     <method name="ShowOSD">
+       <arg type="a{sv}" direction="in" name="params"/>
+--- a/plugins/color/gsd-color-calibrate.c
++++ b/plugins/color/gsd-color-calibrate.c
+@@ -79,8 +79,8 @@
+         g_autoptr (GError) error = NULL;
+         g_autoptr (GAppInfo) app_info = NULL;
+ 
+-        app_info = g_app_info_create_from_commandline (BINDIR "/gnome-control-center color",
+-                                                       "gnome-control-center",
++        app_info = g_app_info_create_from_commandline (BINDIR "/honk-settings color",
++                                                       "honk-settings",
+                                                        G_APP_INFO_CREATE_SUPPORTS_STARTUP_NOTIFICATION,
+                                                        &error);
+         if (app_info == NULL) {
+@@ -94,7 +94,7 @@
+                                 NULL,
+                                 G_APP_LAUNCH_CONTEXT (launch_context),
+                                 &error)) {
+-                g_warning ("failed to launch gnome-control-center: %s",
++                g_warning ("failed to launch honk-settings: %s",
+                            error->message);
+         }
+ }
+--- a/plugins/datetime/gsd-datetime-manager.c
++++ b/plugins/datetime/gsd-datetime-manager.c
+@@ -58,11 +58,11 @@
+ {
+         g_autoptr (GAppInfo) app_info = NULL;
+         g_autoptr (GError) error = NULL;
+-        static const char *commandline = BINDIR "/gnome-control-center datetime";
++        static const char *commandline = BINDIR "/honk-settings datetime";
+ 
+         g_debug ("Running %s", commandline);
+         app_info = g_app_info_create_from_commandline (commandline,
+-                                                       "gnome-control-center",
++                                                       "honk-settings",
+                                                        G_APP_INFO_CREATE_SUPPORTS_STARTUP_NOTIFICATION,
+                                                        &error);
+         if (app_info) {
+--- a/plugins/housekeeping/gsd-donation-reminder.c
++++ /dev/null
+@@ -1,437 +0,0 @@
+-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 8 -*-
+- * vim: set et sw=8 ts=8:
+- *
+- * Copyright (c) 2025 GNOME Foundation.
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published by
+- * the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+- *
+- * Authors: Carlos Garnacho <carlosg@gnome.org>
+- */
+-
+-#include "config.h"
+-
+-#include "gsd-donation-reminder.h"
+-
+-#include <glib/gi18n.h>
+-#include <libnotify/notify.h>
+-
+-#define DONATE_URL_BASE "https://donate.gnome.org/?mtm_medium=notification"
+-
+-#define CAMPAIGN_CHECK_URL "https://donate.gnome.org/api/campaign"
+-
+-#define DONATE_SCHEMA "org.gnome.settings-daemon.plugins.housekeeping"
+-#define DONATE_LAST_SHOWN_KEY "donation-reminder-last-shown"
+-#define DONATE_ENABLED_KEY "donation-reminder-enabled"
+-
+-#define GROUP_NAME "Campaign"
+-
+-#define HOUR_IN_SEC (60 * 60)
+-#define DAY_IN_SEC (24 * 60 * 60)
+-
+-typedef struct _GsdDonationReminder GsdDonationReminder;
+-struct _GsdDonationReminder
+-{
+-        NotifyNotification *notification;
+-        GSettings *settings;
+-        guint check_timeout_id;
+-        gboolean already_running;
+-
+-        GKeyFile *key_file;
+-        GFile *local_file;
+-        GFile *sha_file;
+-        GFileMonitor *file_monitor;
+-        char *campaign_id;
+-        char *distro_id;
+-};
+-
+-static GsdDonationReminder *reminders = NULL;
+-
+-static void
+-closed_cb (NotifyNotification  *n,
+-           GsdDonationReminder *reminders)
+-{
+-        g_assert (n == reminders->notification);
+-        g_clear_object (&reminders->notification);
+-}
+-
+-static void
+-donate_cb (NotifyNotification  *n,
+-           const char          *action,
+-           GsdDonationReminder *reminders)
+-{
+-        g_autoptr (GAppLaunchContext) context = NULL;
+-        g_autoptr (GError) error = NULL;
+-        g_autoptr (GString) url = NULL;
+-
+-        g_assert (n == reminders->notification);
+-
+-        context = notify_notification_get_activation_app_launch_context (n);
+-
+-        url = g_string_new (DONATE_URL_BASE);
+-
+-        if (reminders->campaign_id) {
+-                g_string_append (url, "&mtm_campaign=");
+-                g_string_append_uri_escaped (url,
+-                                             reminders->campaign_id,
+-                                             NULL, FALSE);
+-        }
+-
+-        if (reminders->distro_id) {
+-                g_string_append (url, "&mtm_source=");
+-                g_string_append_uri_escaped (url,
+-                                             reminders->distro_id,
+-                                             NULL, FALSE);
+-        }
+-
+-        if (!g_app_info_launch_default_for_uri (url->str,
+-                                                context,
+-                                                &error))
+-                g_warning ("Failed to open link: %s", error->message);
+-
+-        notify_notification_close (n, NULL);
+-}
+-
+-static void
+-show_notification (GsdDonationReminder *reminders)
+-{
+-        g_autofree char *name = NULL, *comment = NULL, *id = NULL;
+-
+-        if (reminders->notification)
+-                return;
+-
+-        name = g_key_file_get_locale_string (reminders->key_file,
+-                                             GROUP_NAME, "Name", NULL, NULL);
+-        comment = g_key_file_get_locale_string (reminders->key_file,
+-                                                GROUP_NAME, "Comment", NULL, NULL);
+-
+-        id = g_key_file_get_string (reminders->key_file, GROUP_NAME, "Id", NULL);
+-
+-        if (!name || !comment)
+-                return;
+-
+-        reminders->notification =
+-                notify_notification_new (name, comment, NULL);
+-        g_signal_connect (reminders->notification,
+-                          "closed",
+-                          G_CALLBACK (closed_cb),
+-                          reminders);
+-
+-        g_clear_pointer (&reminders->campaign_id, g_free);
+-        reminders->campaign_id = g_steal_pointer (&id);
+-
+-        notify_notification_set_app_name (reminders->notification, _("GNOME"));
+-        notify_notification_set_urgency (reminders->notification, NOTIFY_URGENCY_NORMAL);
+-        notify_notification_set_timeout (reminders->notification, NOTIFY_EXPIRES_DEFAULT);
+-        notify_notification_set_hint_string (reminders->notification, "desktop-entry", "gnome-about-panel");
+-
+-        notify_notification_add_action (reminders->notification,
+-                                        "donate",
+-                                        _("Donate"),
+-                                        (NotifyActionCallback) donate_cb,
+-                                        reminders,
+-                                        NULL);
+-
+-        notify_notification_set_category (reminders->notification, "device");
+-
+-        if (!notify_notification_show (reminders->notification, NULL))
+-                g_warning ("failed to send donation reminder\n");
+-}
+-
+-static gboolean
+-load_key_file (GsdDonationReminder *reminders)
+-{
+-        g_autoptr (GKeyFile) key_file = NULL;
+-        g_autofree char *last_sha = NULL, *new_sha = NULL;
+-
+-        key_file = g_key_file_new ();
+-
+-        if (!g_key_file_load_from_file (key_file,
+-                                        g_file_peek_path (reminders->local_file),
+-                                        G_KEY_FILE_KEEP_COMMENTS |
+-                                        G_KEY_FILE_KEEP_TRANSLATIONS,
+-                                        NULL))
+-                return FALSE;
+-
+-        g_clear_pointer (&reminders->key_file, g_key_file_unref);
+-        reminders->key_file = g_steal_pointer (&key_file);
+-
+-        new_sha = g_key_file_get_string (reminders->key_file,
+-                                         GROUP_NAME, "Sha", NULL);
+-        if (!new_sha)
+-                return FALSE;
+-
+-        g_file_get_contents (g_file_peek_path (reminders->sha_file),
+-                             &last_sha, NULL, NULL);
+-
+-        if (g_strcmp0 (last_sha, new_sha) != 0) {
+-                /* New campaign, reset the last shown key */
+-                g_settings_set_int64 (reminders->settings, DONATE_LAST_SHOWN_KEY, 0);
+-                g_file_set_contents (g_file_peek_path (reminders->sha_file),
+-                                     new_sha, -1, NULL);
+-        }
+-
+-        return TRUE;
+-}
+-
+-static gboolean
+-should_show_notification (GsdDonationReminder *reminders,
+-                          GDateTime           *now)
+-{
+-        g_autofree char *start_str = NULL, *start_as_datetime = NULL;
+-        g_autoptr (GDateTime) start_date = NULL, last_shown = NULL, next_shown = NULL;
+-        g_autoptr (GTimeZone) tz = NULL;
+-        int64_t last_shown_time;
+-        int repeat_delay;
+-
+-        start_str = g_key_file_get_string (reminders->key_file,
+-                                           GROUP_NAME, "Start", NULL);
+-        if (!start_str)
+-                return FALSE;
+-
+-        repeat_delay = g_key_file_get_integer (reminders->key_file,
+-                                               GROUP_NAME, "RepeatDelay", NULL);
+-        if (repeat_delay == 0)
+-                return FALSE;
+-
+-        tz = g_time_zone_new_local ();
+-        start_as_datetime = g_strdup_printf ("%sT12:00:00", start_str);
+-        start_date = g_date_time_new_from_iso8601 (start_as_datetime, tz);
+-        if (!start_date)
+-                return FALSE;
+-
+-        last_shown_time = g_settings_get_int64 (reminders->settings,
+-                                                DONATE_LAST_SHOWN_KEY);
+-        if (last_shown_time) {
+-                last_shown = g_date_time_new_from_unix_local_usec (last_shown_time);
+-                next_shown = g_date_time_add_days (last_shown, repeat_delay);
+-        }
+-
+-        /* The time to show this campaign did not start yet */
+-        if (!last_shown && g_date_time_difference (now, start_date) < 0)
+-                return FALSE;
+-
+-        /* The campaign was already shown, it's not time to show it again yet */
+-        if (next_shown && g_date_time_difference (now, next_shown) < 0)
+-                return FALSE;
+-
+-        return TRUE;
+-}
+-
+-static void
+-check_show_notification (GsdDonationReminder *reminders)
+-{
+-        g_autoptr (GDateTime) now = NULL;
+-
+-        now = g_date_time_new_now_local ();
+-
+-        if (should_show_notification (reminders, now)) {
+-                show_notification (reminders);
+-                g_settings_set_int64 (reminders->settings,
+-                                      DONATE_LAST_SHOWN_KEY,
+-                                      g_date_time_to_unix_usec (now));
+-        }
+-}
+-
+-static void
+-on_donations_file_changed (GFileMonitor      *monitor,
+-                           GFile             *file,
+-                           GFile             *other_file,
+-                           GFileMonitorEvent  event,
+-                           gpointer           user_data)
+-{
+-        GsdDonationReminder *reminders = user_data;
+-
+-        if (event != G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT)
+-                return;
+-
+-        if (!load_key_file (reminders))
+-                return;
+-
+-        check_show_notification (reminders);
+-}
+-
+-static void
+-read_remote_file_cb (GObject      *object,
+-                     GAsyncResult *res,
+-                     gpointer      user_data)
+-{
+-        GsdDonationReminder *reminders = user_data;
+-        g_autoptr (GInputStream) istream = NULL;
+-        g_autoptr (GOutputStream) ostream = NULL;
+-        g_autoptr (GFile) dir = NULL;
+-
+-        istream = G_INPUT_STREAM (g_file_read_finish (G_FILE (object), res, NULL));
+-        if (!istream)
+-                return;
+-
+-        dir = g_file_get_parent (reminders->local_file);
+-
+-        g_file_make_directory_with_parents (dir, NULL, NULL);
+-
+-        ostream = G_OUTPUT_STREAM (g_file_replace (reminders->local_file,
+-                                                   NULL, FALSE,
+-                                                   G_FILE_CREATE_REPLACE_DESTINATION,
+-                                                   NULL, NULL));
+-        if (!ostream)
+-                return;
+-
+-        g_output_stream_splice_async (ostream,
+-                                      istream,
+-                                      G_OUTPUT_STREAM_SPLICE_CLOSE_SOURCE |
+-                                      G_OUTPUT_STREAM_SPLICE_CLOSE_TARGET,
+-                                      G_PRIORITY_DEFAULT,
+-                                      NULL, NULL, NULL);
+-}
+-
+-static void
+-download_file (GsdDonationReminder *reminders)
+-{
+-        g_autoptr (GFile) source_file = NULL;
+-
+-        source_file = g_file_new_for_uri (CAMPAIGN_CHECK_URL);
+-
+-        g_file_read_async (source_file, G_PRIORITY_DEFAULT,
+-                           NULL, read_remote_file_cb, reminders);
+-}
+-
+-static gboolean
+-check_download_cb (GsdDonationReminder *reminders)
+-{
+-        download_file (reminders);
+-
+-        if (reminders->already_running) {
+-                return G_SOURCE_CONTINUE;
+-        } else {
+-                /* Replace with a longer timeout */
+-                reminders->already_running = TRUE;
+-                g_clear_handle_id (&reminders->check_timeout_id, g_source_remove);
+-                reminders->check_timeout_id =
+-                        g_timeout_add_seconds (DAY_IN_SEC,
+-                                               (GSourceFunc) check_download_cb,
+-                                               reminders);
+-                return G_SOURCE_REMOVE;
+-        }
+-}
+-
+-static char *
+-get_os_release_variable (GBytes     *bytes,
+-                         const char *var_name)
+-{
+-        g_autofree char *initial_match = NULL, *substr_match = NULL;
+-        size_t len, start_pos, end_pos;
+-        const char *content, *ptr;
+-
+-        content = g_bytes_get_data (bytes, &len);
+-
+-        initial_match = g_strconcat (var_name, "=", NULL);
+-        substr_match = g_strconcat ("\n", var_name, "=", NULL);
+-
+-        if (len > strlen (initial_match) &&
+-            memcmp (content, initial_match, strlen (initial_match)) == 0) {
+-                start_pos = strlen (initial_match) + 1;
+-        } else {
+-                if ((ptr = memmem (content, len, substr_match, strlen (substr_match))) == NULL)
+-                        return NULL;
+-
+-                start_pos = ptr - content + strlen (initial_match) + 1;
+-        }
+-
+-        g_assert (start_pos <= len);
+-        ptr = memmem (&content[start_pos], len - start_pos, "\n", strlen ("\n"));
+-        end_pos = ptr ? ptr - content : len;
+-        g_assert (end_pos <= len);
+-
+-        return g_strndup (&content[start_pos], end_pos - start_pos);
+-}
+-
+-static char *
+-get_distro_id (void)
+-{
+-        g_autoptr (GMappedFile) os_release = NULL;
+-        g_autoptr (GBytes) bytes = NULL;
+-        g_autofree char *id = NULL, *version_id = NULL;
+-
+-        os_release = g_mapped_file_new ("/etc/os-release", FALSE, NULL);
+-        if (!os_release)
+-                return NULL;
+-
+-        bytes = g_mapped_file_get_bytes (os_release);
+-
+-        id = get_os_release_variable (bytes, "ID");
+-        version_id = get_os_release_variable (bytes, "VERSION_ID");
+-
+-        return g_strconcat (id, "-", version_id, NULL);
+-}
+-
+-void
+-gsd_donation_reminder_init (void)
+-{
+-        g_autoptr (GSettings) settings = NULL;
+-        g_autofree char *path = NULL, *sha_path = NULL;
+-
+-        if (reminders)
+-                return;
+-
+-        settings = g_settings_new (DONATE_SCHEMA);
+-
+-        if (!g_settings_get_boolean (settings, DONATE_ENABLED_KEY))
+-                return;
+-
+-        reminders = g_new0 (GsdDonationReminder, 1);
+-        reminders->settings = g_steal_pointer (&settings);
+-        reminders->check_timeout_id =
+-                g_timeout_add_seconds (HOUR_IN_SEC,
+-                                       (GSourceFunc) check_download_cb,
+-                                       reminders);
+-
+-        sha_path = g_build_filename (g_get_user_cache_dir (),
+-                                     "gnome-settings-daemon",
+-                                     "donations.sha",
+-                                     NULL);
+-        reminders->sha_file = g_file_new_for_path (sha_path);
+-
+-        path = g_build_filename (g_get_user_cache_dir (),
+-                                 "gnome-settings-daemon",
+-                                 "donations",
+-                                 NULL);
+-        reminders->local_file = g_file_new_for_path (path);
+-
+-        reminders->file_monitor = g_file_monitor_file (reminders->local_file,
+-                                                       G_FILE_MONITOR_NONE,
+-                                                       NULL, NULL);
+-        g_signal_connect (reminders->file_monitor,
+-                          "changed",
+-                          G_CALLBACK (on_donations_file_changed),
+-                          reminders);
+-
+-        reminders->distro_id = get_distro_id ();
+-}
+-
+-void
+-gsd_donation_reminder_end (void)
+-{
+-        if (!reminders)
+-                return;
+-
+-        g_clear_handle_id (&reminders->check_timeout_id, g_source_remove);
+-        g_clear_object (&reminders->notification);
+-        g_clear_object (&reminders->settings);
+-        g_clear_object (&reminders->local_file);
+-        g_clear_object (&reminders->sha_file);
+-        g_clear_pointer (&reminders->key_file, g_key_file_unref);
+-        g_signal_handlers_disconnect_by_data (reminders->file_monitor, reminders);
+-        g_clear_object (&reminders->file_monitor);
+-        g_clear_pointer (&reminders->distro_id, g_free);
+-        g_free (reminders);
+-}
+--- a/plugins/housekeeping/gsd-donation-reminder.h
++++ /dev/null
+@@ -1,28 +0,0 @@
+-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 8 -*-
+- * vim: set et sw=8 ts=8:
+- *
+- * Copyright (c) 2025 GNOME Foundation.
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published by
+- * the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+- *
+- * Authors: Carlos Garnacho <carlosg@gnome.org>
+- */
+-
+-#pragma once
+-
+-#include <glib.h>
+-
+-void gsd_donation_reminder_init (void);
+-
+-void gsd_donation_reminder_end (void);
+--- a/plugins/housekeeping/gsd-housekeeping-manager.c
++++ b/plugins/housekeeping/gsd-housekeeping-manager.c
+@@ -26,7 +26,6 @@
+ #include "gnome-settings-profile.h"
+ #include "gsd-housekeeping-manager.h"
+ #include "gsd-disk-space.h"
+-#include "gsd-donation-reminder.h"
+ #include "gsd-systemd-notify.h"
+ 
+ 
+@@ -400,7 +399,6 @@
+ 
+         G_APPLICATION_CLASS (gsd_housekeeping_manager_parent_class)->startup (app);
+ 
+-        gsd_donation_reminder_init ();
+ 
+         gnome_settings_profile_end (NULL);
+ }
+@@ -412,7 +410,6 @@
+ 
+         g_debug ("Stopping housekeeping manager");
+ 
+-        gsd_donation_reminder_end ();
+ 
+         g_clear_object (&manager->systemd_notify);
+ 
+--- a/plugins/housekeeping/meson.build
++++ b/plugins/housekeeping/meson.build
+@@ -4,7 +4,6 @@
+ )
+ 
+ sources = common_files + files(
+-  'gsd-donation-reminder.c',
+   'gsd-housekeeping-manager.c',
+   'gsd-systemd-notify.c',
+   'main.c'
+--- a/plugins/media-keys/gsd-media-keys-manager.c
++++ b/plugins/media-keys/gsd-media-keys-manager.c
+@@ -75,8 +75,8 @@
+ #define GNOME_KEYRING_DBUS_PATH "/org/gnome/keyring/daemon"
+ #define GNOME_KEYRING_DBUS_INTERFACE "org.gnome.keyring.Daemon"
+ 
+-#define SHELL_DBUS_NAME "org.gnome.Shell"
+-#define SHELL_DBUS_PATH "/org/gnome/Shell"
++#define SHELL_DBUS_NAME "org.honk.Shell"
++#define SHELL_DBUS_PATH "/org/honk/Shell"
+ 
+ #define CUSTOM_BINDING_SCHEMA SETTINGS_BINDING_DIR ".custom-keybinding"
+ 
+@@ -109,9 +109,9 @@
+ #define SYSTEMD_DBUS_INTERFACE                  "org.freedesktop.login1.Manager"
+ #define SD_LOGIND_SKIP_INHIBITORS               (UINT64_C(1) << 4)
+ 
+-#define AUDIO_SELECTION_DBUS_NAME               "org.gnome.Shell.AudioDeviceSelection"
+-#define AUDIO_SELECTION_DBUS_PATH               "/org/gnome/Shell/AudioDeviceSelection"
+-#define AUDIO_SELECTION_DBUS_INTERFACE          "org.gnome.Shell.AudioDeviceSelection"
++#define AUDIO_SELECTION_DBUS_NAME               "org.honk.Shell.AudioDeviceSelection"
++#define AUDIO_SELECTION_DBUS_PATH               "/org/honk/Shell/AudioDeviceSelection"
++#define AUDIO_SELECTION_DBUS_INTERFACE          "org.honk.Shell.AudioDeviceSelection"
+ 
+ #define GSD_MEDIA_KEYS_MANAGER_GET_PRIVATE(o) (gsd_media_keys_manager_get_instance_private (o))
+ 
+@@ -2503,7 +2503,7 @@
+                 do_execute_desktop_or_desktop (manager, "org.gnome.Calculator.desktop", "gnome-calculator.desktop", timestamp);
+                 break;
+         case CONTROL_CENTER_KEY:
+-                do_execute_desktop_or_desktop (manager, "org.gnome.Settings.desktop", NULL, timestamp);
++                do_execute_desktop_or_desktop (manager, "org.honk.Settings.desktop", NULL, timestamp);
+                 break;
+         case PLAY_KEY:
+                 return do_multimedia_player_action (manager, "Play");
+--- a/plugins/media-keys/meson.build
++++ b/plugins/media-keys/meson.build
+@@ -19,7 +19,7 @@
+ sources += gnome.gdbus_codegen(
+   'shell-key-grabber',
+   'org.gnome.ShellKeyGrabber.xml',
+-  interface_prefix: 'org.gnome.',
++  interface_prefix: 'org.honk.',
+   namespace: 'Shell'
+ )
+ 
+--- a/plugins/media-keys/org.gnome.ShellKeyGrabber.xml
++++ b/plugins/media-keys/org.gnome.ShellKeyGrabber.xml
+@@ -1,5 +1,5 @@
+ <node>
+-  <interface name="org.gnome.Shell">
++  <interface name="org.honk.Shell">
+     <annotation name="org.gtk.GDBus.C.Name" value="KeyGrabber"/>
+     <method name="GrabAccelerator">
+       <arg type="s" direction="in" name="accelerator"/>
+--- a/plugins/power/dbusmock-templates/gnome-shell.py
++++ b/plugins/power/dbusmock-templates/gnome-shell.py
+@@ -16,9 +16,9 @@
+ from dbusmock import MOCK_IFACE, mockobject
+ 
+ 
+-BUS_NAME = 'org.gnome.Shell.Brightness'
+-MAIN_OBJ = '/org/gnome/Shell/Brightness'
+-MAIN_IFACE = 'org.gnome.Shell.Brightness'
++BUS_NAME = 'org.honk.Shell.Brightness'
++MAIN_OBJ = '/org/honk/Shell/Brightness'
++MAIN_IFACE = 'org.honk.Shell.Brightness'
+ SYSTEM_BUS = False
+ 
+ 
+--- a/plugins/power/dbusmock-templates/mutter.py
++++ b/plugins/power/dbusmock-templates/mutter.py
+@@ -16,10 +16,10 @@
+ from dbusmock import MOCK_IFACE, mockobject
+ 
+ 
+-BUS_NAME = 'org.gnome.Mutter.DisplayConfig'
+-MAIN_OBJ = '/org/gnome/Mutter/DisplayConfig'
+-MAIN_IFACE = 'org.gnome.Mutter.DisplayConfig'
+-MOCK_IFACE = 'org.gnome.Mutter.DisplayConfig.Mock'
++BUS_NAME = 'org.honk.HWin.DisplayConfig'
++MAIN_OBJ = '/org/honk/HWin/DisplayConfig'
++MAIN_IFACE = 'org.honk.HWin.DisplayConfig'
++MOCK_IFACE = 'org.honk.HWin.DisplayConfig.Mock'
+ SYSTEM_BUS = False
+ 
+ 
+--- a/plugins/power/gpm-common.c
++++ b/plugins/power/gpm-common.c
+@@ -295,12 +295,12 @@
+ 
+         connection = g_dbus_proxy_get_connection (G_DBUS_PROXY (display_config));
+         variant = g_dbus_connection_call_sync (connection,
+-                                               "org.gnome.Mutter.DisplayConfig",
+-                                               "/org/gnome/Mutter/DisplayConfig",
++                                               "org.honk.HWin.DisplayConfig",
++                                               "/org/honk/HWin/DisplayConfig",
+                                                "org.freedesktop.DBus.Properties",
+                                                "Get",
+                                                g_variant_new ("(ss)",
+-                                                              "org.gnome.Mutter.DisplayConfig",
++                                                              "org.honk.HWin.DisplayConfig",
+                                                               "HasExternalMonitor"),
+                                                NULL,
+                                                G_DBUS_CALL_FLAGS_NONE,
+--- a/plugins/power/gsd-power-manager.c
++++ b/plugins/power/gsd-power-manager.c
+@@ -73,9 +73,9 @@
+ #define SYSTEMD_DBUS_PATH                       "/org/freedesktop/login1"
+ #define SYSTEMD_DBUS_INTERFACE                  "org.freedesktop.login1.Manager"
+ 
+-#define SHELL_BRIGHTNESS_DBUS_NAME              "org.gnome.Shell.Brightness"
+-#define SHELL_BRIGHTNESS_DBUS_PATH              "/org/gnome/Shell/Brightness"
+-#define SHELL_BRIGHTNESS_DBUS_INTERFACE         "org.gnome.Shell.Brightness"
++#define SHELL_BRIGHTNESS_DBUS_NAME              "org.honk.Shell.Brightness"
++#define SHELL_BRIGHTNESS_DBUS_PATH              "/org/honk/Shell/Brightness"
++#define SHELL_BRIGHTNESS_DBUS_INTERFACE         "org.honk.Shell.Brightness"
+ 
+ /* Time between notifying the user about a critical action and the action itself in UPower. */
+ #define GSD_ACTION_DELAY 20
+@@ -3251,7 +3251,7 @@
+                                                NULL,
+                                                &error);
+         if (manager->shell_brightness_proxy == NULL) {
+-                g_debug ("No org.gnome.Shell.Brightness support, "
++                g_debug ("No org.honk.Shell.Brightness support, "
+                          "dimming and auto brightness is disabled");
+                 g_clear_error (&error);
+         }
+--- a/plugins/print-notifications/gsd-print-notifications-manager.c
++++ b/plugins/print-notifications/gsd-print-notifications-manager.c
+@@ -471,9 +471,9 @@
+ 
+                 notify_notification_close (notification, NULL);
+ 
+-                commandline = g_strdup_printf (BINDIR "/gnome-control-center printers show-jobs %s", printer_name);
++                commandline = g_strdup_printf (BINDIR "/honk-settings printers show-jobs %s", printer_name);
+                 app_info = g_app_info_create_from_commandline (commandline,
+-                                                               "gnome-control-center",
++                                                               "honk-settings",
+                                                                G_APP_INFO_CREATE_SUPPORTS_STARTUP_NOTIFICATION,
+                                                                &error);
+                 g_free (commandline);
+@@ -485,7 +485,7 @@
+                                                  &error);
+ 
+                         if (!ret) {
+-                                g_warning ("failed to launch gnome-control-center: %s", error->message);
++                                g_warning ("failed to launch honk-settings: %s", error->message);
+                                 g_error_free (error);
+                         }
+ 
+--- a/plugins/xsettings/gsd-xsettings-manager.c
++++ b/plugins/xsettings/gsd-xsettings-manager.c
+@@ -605,12 +605,12 @@
+         int ui_scaling_factor = 1;
+ 
+         res = g_dbus_connection_call_sync (connection,
+-                                           "org.gnome.Mutter.X11",
+-                                           "/org/gnome/Mutter/X11",
++                                           "org.honk.HWin.X11",
++                                           "/org/honk/HWin/X11",
+                                            "org.freedesktop.DBus.Properties",
+                                            "Get",
+                                            g_variant_new ("(ss)",
+-                                                          "org.gnome.Mutter.X11",
++                                                          "org.honk.HWin.X11",
+                                                           "UiScalingFactor"),
+                                            NULL,
+                                            G_DBUS_CALL_FLAGS_NO_AUTO_START,
+@@ -1093,12 +1093,12 @@
+         gboolean animations_enabled;
+ 
+         res = g_dbus_connection_call_sync (connection,
+-                                           "org.gnome.Shell.Introspect",
+-                                           "/org/gnome/Shell/Introspect",
++                                           "org.honk.Shell.Introspect",
++                                           "/org/honk/Shell/Introspect",
+                                            "org.freedesktop.DBus.Properties",
+                                            "Get",
+                                            g_variant_new ("(ss)",
+-                                                          "org.gnome.Shell.Introspect",
++                                                          "org.honk.Shell.Introspect",
+                                                           "AnimationsEnabled"),
+                                            NULL,
+                                            G_DBUS_CALL_FLAGS_NONE,
+@@ -1325,10 +1325,10 @@
+ 
+         manager->monitors_changed_id =
+                 g_dbus_connection_signal_subscribe (connection,
+-                                                    "org.gnome.Mutter.X11",
++                                                    "org.honk.HWin.X11",
+                                                     "org.freedesktop.DBus.Properties",
+                                                     "PropertiesChanged",
+-                                                    "/org/gnome/Mutter/X11",
++                                                    "/org/honk/HWin/X11",
+                                                     NULL,
+                                                     G_DBUS_SIGNAL_FLAGS_NONE,
+                                                     on_mutter_x11_properties_changed,
+@@ -1336,7 +1336,7 @@
+                                                     NULL);
+         manager->display_config_watch_id =
+                 g_bus_watch_name_on_connection (connection,
+-                                                "org.gnome.Mutter.X11",
++                                                "org.honk.HWin.X11",
+                                                 G_BUS_NAME_WATCHER_FLAGS_NONE,
+                                                 on_mutter_x11_name_appeared_handler,
+                                                 NULL,
+@@ -1345,10 +1345,10 @@
+ 
+         manager->introspect_properties_changed_id =
+                 g_dbus_connection_signal_subscribe (connection,
+-                                                    "org.gnome.Shell.Introspect",
++                                                    "org.honk.Shell.Introspect",
+                                                     "org.freedesktop.DBus.Properties",
+                                                     "PropertiesChanged",
+-                                                    "/org/gnome/Shell/Introspect",
++                                                    "/org/honk/Shell/Introspect",
+                                                     NULL,
+                                                     G_DBUS_SIGNAL_FLAGS_NONE,
+                                                     on_introspect_properties_changed,
+@@ -1356,7 +1356,7 @@
+                                                     NULL);
+         manager->shell_introspect_watch_id =
+                 g_bus_watch_name_on_connection (connection,
+-                                                "org.gnome.Shell.Introspect",
++                                                "org.honk.Shell.Introspect",
+                                                 G_BUS_NAME_WATCHER_FLAGS_NONE,
+                                                 on_shell_introspect_name_appeared_handler,
+                                                 NULL,
+--- a/po/POTFILES.in
++++ b/po/POTFILES.in
+@@ -14,7 +14,6 @@
+ plugins/color/gsd-color-manager.c
+ plugins/datetime/gsd-datetime-manager.c
+ plugins/housekeeping/gsd-disk-space.c
+-plugins/housekeeping/gsd-donation-reminder.c
+ plugins/housekeeping/gsd-systemd-notify.c
+ plugins/keyboard/gsd-keyboard-manager.c
+ plugins/media-keys/gsd-media-keys-manager.c
+--- a/po/af.po
++++ b/po/af.po
+@@ -5,7 +5,7 @@
+ # F Wolff <friedel@translate.org.za>, 2008
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center 2.6-branch\n"
++"Project-Id-Version: honk-settings 2.6-branch\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-09-22 00:13+0200\n"
+ "PO-Revision-Date: 2008-09-15 23:10+0200\n"
+--- a/po/am.po
++++ b/po/am.po
+@@ -6,7 +6,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center\n"
++"Project-Id-Version: honk-settings\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2003-02-03 10:16+EDT\n"
+--- a/po/az.po
++++ b/po/az.po
+@@ -7,7 +7,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center.HEAD\n"
++"Project-Id-Version: honk-settings.HEAD\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2004-09-04 19:45+0300\n"
+--- a/po/be.po
++++ b/po/be.po
+@@ -548,24 +548,6 @@
+ "Час у хвілінах. Паўторныя апавяшчэнні для дыскавага тома не будуць "
+ "паўтарацца часцей за гэты перыяд."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Ці ўключаны напаміны пра ахвяраванне"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Уключае або выключае не вельмі частыя апавяшчэнні з нагадваннем зрабіць "
+-"ахвяраванне."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Час, калі ў апошні раз паказваўся напамін пра ахвяраванне"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Час, калі ў апошні раз паказваўся напамін пра ахвяраванне."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1618,26 +1600,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "На дыску камп'ютара засталося мала вольнага месца (%s)."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Падтрымайце GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME патрэбна дапамога. Ваша ахвяраванне захавае наш праект з адкрытым "
+-"зыходным кодам для будучых пакаленняў."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:88
+-msgid "Donate"
+-msgstr "Ахвяраванне"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/bg.po
++++ b/po/bg.po
+@@ -550,22 +550,6 @@
+ "Интервал в минути. Повторните предупреждения за файловата система ще се "
+ "появяват не по-често от този период."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Дали напомнянията за даряване са включени"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Включва или изключва рядко показваното напомняне за даряване."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Последният път, когато напомнянето за даряване бе показано"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Датата на последното показване на напомнянето за даряване."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1616,24 +1600,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "На компютъра са останали свободни само %s."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Подкрепете GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr "GNOME се нуждае от вашата помощ. Дарението ви ще подкрепи нашия проект с отворен код за бъдещите поколения."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:88
+-msgid "Donate"
+-msgstr "Дарете"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/bs.po
++++ b/po/bs.po
+@@ -5,7 +5,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center.HEAD.bs\n"
++"Project-Id-Version: honk-settings.HEAD.bs\n"
+ "Report-Msgid-Bugs-To: http://bugzilla.gnome.org/enter_bug.cgi?product=gnome-"
+ "settings-daemon&keywords=I18N+L10N&component=general\n"
+ "POT-Creation-Date: 2015-02-26 20:42+0000\n"
+--- a/po/ca.po
++++ b/po/ca.po
+@@ -562,26 +562,6 @@
+ "Especifica un temps en minuts. Els pròxims avisos per a un volum no "
+ "apareixeran abans d'aquest període de temps."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Si els recordatoris de donació estan habilitats"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Habilita o inhabilita la notificació de recordatori de donació de baixa "
+-"freqüència."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Última vegada que es va mostrar el recordatori de donació"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr ""
+-"Marca temporal de l'última vegada que es va mostrar un recordatori de "
+-"donació."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1635,26 +1615,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Aquest ordinador només li resta %s d'espai de disc."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Ajudeu al GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"El GNOME necessita la vostra ajuda. La vostra donació permetrà mantenir el "
+-"nostre projecte de programari lliure per a les generacions futures."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Dóna"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/cs.po
++++ b/po/cs.po
+@@ -557,22 +557,6 @@
+ "Určuje čas v minutách. Následná varování u svazku se nezobrazí dříve než po "
+ "této době."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Zda jsou povolena připomenutí darů"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Povolí nebo zakáže nízkofrekvenční upozornění na připomenutí daru."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Kdy se naposledy zobrazilo připomenutí daru"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Časové razítko posledního zobrazení připomenutí daru."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1627,26 +1611,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "U tohoto počítače zbývá pouze %s volného místa na disku."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "Podpořte GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME potřebuje vaši pomoc. Váš dar udrží náš open source projekt pro "
+-"budoucí generace."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "Věnovat dar"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/cy.po
++++ b/po/cy.po
+@@ -20,7 +20,7 @@
+ # [rj] Wedi gyrru'r cyfan drwy Cysill, 29ain Mai 2005.
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center\n"
++"Project-Id-Version: honk-settings\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2006-03-08 12:53-0000\n"
+--- a/po/da.po
++++ b/po/da.po
+@@ -557,23 +557,6 @@
+ "Angiv en tid i minutter. Efterfølgende advarsler for en diskenhed vil ikke "
+ "blive vist oftere end dette interval."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Hvorvidt påmindelser om donation er aktiveret"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Aktiverer eller deaktiverer påmindelser med lav frekvens om donation."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Sidste gang påmindelsen om donation blev vist"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr ""
+-"Tidsstempel for den seneste gang hvor en påmindelse om donation blev vist."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1606,26 +1589,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Denne computer har kun %s resterende diskplads."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "Støt GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project for "
+-"future generations."
+-msgstr ""
+-"GNOME har brug for din hjælp. Din donation vil støtte vores open source-"
+-"projekt for fremtidige generationer."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "Donér"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/de.po
++++ b/po/de.po
+@@ -580,25 +580,6 @@
+ "Geben Sie eine Zeit in Minuten an. Wiederholte Warnungen für einen "
+ "Datenträger erscheinen nicht öfter als in diesem Abstand."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Legt fest, ob Spenden-Erinnerungen aktiviert sind"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Aktiviert oder deaktiviert die Benachrichtigung zur Spenden-Erinnerung mit "
+-"geringer Häufigkeit."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Das letzte Mal, als die Spenden-Erinnerung angezeigt wurde"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr ""
+-"Zeitstempel für das letzte Mal, als eine Spenden-Erinnerung angezeigt wurde."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1666,26 +1647,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Auf diesem Rechner ist nur noch %s Speicherplatz verfügbar."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "GNOME unterstützen"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME benötigt Ihre Unterstützung. Ihre Spende wird unser Open-Source-"
+-"Projekt in Zukunft am Leben halten."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:88
+-msgid "Donate"
+-msgstr "Spenden"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/dz.po
++++ b/po/dz.po
+@@ -4,7 +4,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center.HEAD.dz\n"
++"Project-Id-Version: honk-settings.HEAD.dz\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2007-06-21 23:33+0530\n"
+--- a/po/el.po
++++ b/po/el.po
+@@ -594,25 +594,6 @@
+ "Καθορίστε τον χρόνο σε λεπτά. Οι επόμενες προειδοποιήσεις για έναν τόμο δεν "
+ "θα εμφανίζωνται συχνότερα από αυτήν την περίοδο."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Εάν οι υπενθυμίσεις δωρεών είναι ενεργοποιημένες"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Ενεργοποιεί ή απενεργοποιεί την ειδοποίηση υπενθύμισης δωρεών χαμηλής "
+-"συχνότητας."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Τελευταία φορά που εμφανίστηκε η υπενθύμιση για δωρεά"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr ""
+-"Χρονοσφραγίδα για την τελευταία φορά που εμφανίστηκε υπενθύμιση δωρεάς."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1678,26 +1659,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Αυτός ο υπολογιστής έχει μόνο %s ελεύθερο χώρο στο δίσκο."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Υποστήριξη GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"Το GNOME χρειάζεται τη βοήθειά σας. Η δωρεά σας θα στηρίξει το έργο ανοιχτού "
+-"κώδικα μας για τις μελλοντικές γενιές."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Δωρεά"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/en_CA.po
++++ b/po/en_CA.po
+@@ -6,7 +6,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center\n"
++"Project-Id-Version: honk-settings\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2005-08-06 19:59-0400\n"
+--- a/po/en_GB.po
++++ b/po/en_GB.po
+@@ -534,22 +534,6 @@
+ "Specify a time in minutes. Subsequent warnings for a volume will not appear "
+ "more often than this period."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Whether donation reminders are enabled"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Enables or disables the low-frequency donation reminder notification."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Last time the donation reminder was shown"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Timestamp for the last time a donation reminder was shown."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1576,26 +1560,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "This computer has only %s disk space remaining."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "Support GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "Donate"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/eo.po
++++ b/po/eo.po
+@@ -537,22 +537,6 @@
+ "Specifu tempon en minutoj. Sekvaj avertoj por portilo ne montriĝos antaŭ ol "
+ "tiu periodo finas."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Ĉu donacrememorigiloj estas ebligitaj"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Ebligas aŭ malebligas la maloftan donac-rememorigon."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Lasta fojo kiam montriĝis la donac-rememorigilo"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Tempindiko por la lasta fojo kiam montriĝis donac-rememorigilo."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1585,26 +1569,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "En la komputilo restas nur %s da diska spaco."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Subteni GNOMOn"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOMO bezonas vian helpon. Via donaco subtenos nian malfermitkodan "
+-"projekton por estontaj generacioj."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOMO"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Donaci"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/es.po
++++ b/po/es.po
+@@ -560,25 +560,6 @@
+ "Especificar tiempo en minutos. Las subsecuentes advertencias para un volumen "
+ "no aparecerán más a menudo que este periodo."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Indica si los recordatorio de donación están activatos"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Activa o desactiva las notificaciones de recordatorio de donación de baja "
+-"frecuencia."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Última vez que se mostró el recordatorio de donación"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr ""
+-"Marca de tiempo para la última vez que se mostró el recordatorio de donación."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1623,26 +1604,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Este equipo sólo tiene %s de espacio en disco libre."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Ayude a GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME necesita su ayuda. Su donación sustentará nuestro proyecto de código "
+-"abierto para las futuras generaciones."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Donar"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/eu.po
++++ b/po/eu.po
+@@ -474,22 +474,6 @@
+ "more often than this period."
+ msgstr "Zehaztu denbora minututan. Ondorengo abisuak ez dira epe hori baino lehenago agertuko."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Dohaintza-oroigarriak gaituta dauden ala ez"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Dohaintza-oroigarrien maiztasun baxuko jakinarazpenak gaitzen edo desgaitzen ditu."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Dohaintza-oroigarri bat erakutsi den azken aldia"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Dohaintza-oroigarri bat erakutsi den azken aldiaren denbora-zigilua."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1475,24 +1459,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Ordenagailu honen leku librea: %s."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "Lagundu GNOMEri"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr "GNOMEk zure laguntza behar du. Zure dirulaguntzak kode irekiko gure proiektuari eusten lagunduko dio datozen belaunaldietan."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "Lagundu diruz"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/fa.po
++++ b/po/fa.po
+@@ -12,7 +12,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center HEAD\n"
++"Project-Id-Version: honk-settings HEAD\n"
+ "Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/gnome-settings-daemon/issues/\n"
+ "POT-Creation-Date: 2025-08-15 09:16+0000\n"
+ "PO-Revision-Date: 2025-08-16 15:09+0330\n"
+@@ -506,22 +506,6 @@
+ msgstr ""
+ "مشخّص کردن زمانی به دقیقه. هشدارهای بعدی برای حجم پیش از این دوره ظاهر نخواهند شد."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "این که آیا یادآوری‌های اعانه به کار افتاده‌اند یا نه."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "آگاهی یادآور اعانهٔ کم‌بسامد را به یا از کار می‌اندازد."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "زمان آخرین نمایش یادآور اعانه"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "برچسب زمانی که آخرین بار یادآور اعانه نشان داده شد."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1539,26 +1523,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "این کامپیوتر تنها %s فضای دیسک باقیمانده دارد."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "پشتیبانی از گنوم"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project for "
+-"future generations."
+-msgstr ""
+-"گنوم نیازمند یاریتان است. اعانه‌هایتان پروژهٔ نرم‌افزار آزادمان را برای نسل‌های آینده "
+-"پایدار خواهد کرد."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "گنوم"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "اعانه"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/fi.po
++++ b/po/fi.po
+@@ -20,7 +20,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center\n"
++"Project-Id-Version: honk-settings\n"
+ "Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/gnome-settings-daemon/"
+ "issues/\n"
+ "POT-Creation-Date: 2025-09-07 10:49+0000\n"
+@@ -530,22 +530,6 @@
+ "Määritä aika minuutteina. Seuraavat varoitukset taltiolle eivät näy useammin "
+ "kuin tämän aikavälin kuluttua."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr ""
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr ""
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr ""
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1683,26 +1667,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Tällä tietokoneella on vain %s levytilaa jäljellä."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Tue Gnomea"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"Gnome tarvitsee apuasi. Lahjoituksesi avulla avoimen lähdekoodin projektimme "
+-"säilyy tuleville sukupolville."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "Gnome"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Lahjoita"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/fr.po
++++ b/po/fr.po
+@@ -568,23 +568,6 @@
+ "Indique un intervalle en minutes. C’est le délai minimal entre deux alertes "
+ "pour un même volume."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Indique si les rappels de don sont activés"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Active ou désactive la notification de rappel de don à faible fréquence."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Dernière fois que le rappel de don a été affiché"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Horodatage de la dernière apparition d’un rappel de don."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1640,26 +1623,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Cet ordinateur n’a plus que %s d’espace disque disponible."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Soutenir GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME a besoin de vous. Votre don permettra de pérenniser notre projet de logiciel libre "
+-"pour les générations futures."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:88
+-msgid "Donate"
+-msgstr "Faire un don"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/fur.po
++++ b/po/fur.po
+@@ -543,26 +543,6 @@
+ "Specifiche un timp in minûts. I sucessîfs avîs par un volum no vegnin "
+ "mostrâts plui dispès di chel indicât."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Indiche se i pro memoria des donazions a son abilitâts"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Al abilite o al disabilite la notifiche par visâ de basse frecuence di "
+-"donazions."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "La ultime volte che il pro memoria pe donazion al è stât mostrât"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr ""
+-"Marcadure temporâl pe ultime volte che al è stât mostrât un pro memoria pe "
+-"donazion."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1611,26 +1591,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Su chest computer a restin nome %s di spazi disc."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Supuarte GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME al à bisugne dal to jutori. La tô donazion e prudele il nestri progjet "
+-"a codiç viert pes gjenerazions futuris."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Done"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/gl.po
++++ b/po/gl.po
+@@ -565,24 +565,6 @@
+ "Especificar tempo en minutos. Os avisos subsecuentes para un volume non se "
+ "repetirán máis a miúdo que ese período."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Indica se activar ou non os recordatorios de doazón"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Activa ou desactiva a notificación de recordatorio de doazón de baixa "
+-"frecuencia."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Última vez que se mostrou o recordatorio de doazón"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Marca de tempo da última vez que se mostrou un recordatorio de doazón."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1627,26 +1609,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "A este computador só lle quedan %s de espazo no disco."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "Apoia GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME precisa axuda. ESta doazón sosterá o noso proxecto de software libre "
+-"para as futuras xeracións."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "Doar"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/he.po
++++ b/po/he.po
+@@ -9,7 +9,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center.HEAD.he\n"
++"Project-Id-Version: honk-settings.HEAD.he\n"
+ "Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/gnome-settings-daemon/"
+ "issues/\n"
+ "POT-Creation-Date: 2025-08-29 19:13+0000\n"
+@@ -535,22 +535,6 @@
+ "Specify a time in minutes. Subsequent warnings for a volume will not appear "
+ "more often than this period."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "האם תזכורות תרומה פעילות"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "הפעלת או השבתת התראות תזכורת לתרום בתכיפות נמוכה"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "הפעם האחרונה שהופיעה תזכורת תרומה"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "חותמת זמן של הפעם האחרונה שהופיעה תזכורת תרומה."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1577,26 +1561,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "במחשב זה ישנם %s פנויים בכונן הקשיח."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "תמיכה ב־GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"מיזם GNOME זקוק לעזרתך. התרומה הכספים שלך תעזור לנו לקיים את מיזם הקוד הפתוח "
+-"שלנו לדורות הבאים."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "תרומה"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/hr.po
++++ b/po/hr.po
+@@ -1,6 +1,6 @@
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center 0\n"
++"Project-Id-Version: honk-settings 0\n"
+ "Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/gnome-settings-daemon/"
+ "issues\n"
+ "POT-Creation-Date: 2022-09-06 16:42+0000\n"
+--- a/po/hu.po
++++ b/po/hu.po
+@@ -544,24 +544,6 @@
+ "A kötetre vonatkozó figyelmeztetések nem jelennek meg ennyi percnél "
+ "gyakrabban."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Az adományozási emlékeztetők engedélyezettek-e"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Engedélyezi vagy letiltja az alacsony gyakoriságú adományozási emlékeztető ért"
+-"esítést."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Az adományozási emlékeztető utolsó megjelenése"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Az utolsó adományozási emlékeztető megjelenésének időbélyege."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1618,26 +1600,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "A számítógépen már csak %s lemezhely maradt."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "A GNOME támogatása"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"A GNOME projektnek szüksége van az Ön segítségére. Adományával hozzájárulhat a"
+-" nyílt forráskódú projektünk fenntartásához a jövő generációi számára."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Adományozás"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/id.po
++++ b/po/id.po
+@@ -540,24 +540,6 @@
+ "Menyatakan waktu dalam menit. Peringatan berikutnya bagi suatu volume tak "
+ "akan muncul lebih sering daripada perioda ini."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Apakah pengingat donasi difungsikan"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Memfungsikan atau menonaktifkan pemberitahuan pengingat donasi frekuensi "
+-"rendah."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Saat terakhir pengingat donasi ditunjukkan"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Stempel waktu bagi saat terakhir suatu pengingat donasi ditunjukkan."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1591,26 +1573,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Komputer ini hanya memiliki %s ruang kosong pada diska."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Dukung GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME memerlukan bantuan Anda. Donasi Anda akan membuat proyek sumber "
+-"terbuka kami bertahan bagi generasi mendatang."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:88
+-msgid "Donate"
+-msgstr "Donasi"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/ja.po
++++ b/po/ja.po
+@@ -538,22 +538,6 @@
+ "時間を分単位で指定します。この時間より短い間隔で容量の警告を表示することはあ"
+ "りません。"
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "寄付のお知らせを有効にするかどうか"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "低頻度の寄付のお知らせ通知を有効または無効にします。"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "寄付のお知らせを最後に表示した時刻"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "寄付のお知らせを最後に表示した時刻のタイムスタンプです。"
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1593,26 +1577,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "このコンピューターにはディスクの残りが %s しかありません。"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "GNOME を支援"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME にはあなたの助けが必要です。あなたの寄付により、私たちのオープンソース"
+-"プロジェクトを将来の世代のために持続させることができます。"
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "寄付"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/ka.po
++++ b/po/ka.po
+@@ -541,25 +541,6 @@
+ "მიუთითეთ დრო, წუთებში, დისკზე ადგილის არქონის შემდეგი გაფრთხილება ამ "
+ "პერიოდზე ხშირად არ გამოჩნდება."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "ჩართულია თუ არა შეწირვის შეხსენებები"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"გამორთავს ან ჩართავს დაბალი სიხშირის მქონე შეწირულობების შეხსენების "
+-"გაფრთხილებას."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "დრო, როცა შეწირულობების შეხსენება ბოლოს იყო ნაჩვენები"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr ""
+-"დროის შტამპი ბოლო დროისთვის, როცა ნაჩვენები იყო შეწირულობის შემხსენებელი."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1606,26 +1587,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "ამ კომპიუტერის დისკზე, მხოლოდ, %s-ა დარჩენილი."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "GNOME-ის მხარდაჭერა"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME-ს თქვენი დახმარება სჭირდება. თქვენი შეწირული თანხა ჩვენი ღია კოდის "
+-"პროექტს მომავალი თაობებისთვის განავითარებს."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "შემოწირულობა"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/kk.po
++++ b/po/kk.po
+@@ -532,24 +532,6 @@
+ "Минут есебімен уақытты көрсетіңіз. Бос орын туралы келесі ескертулер бұл "
+ "уақытта бір реттен көп емес рет көрсетіледі."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Демеушілік ету туралы ескертулер іске қосылған ба"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Төмен жиілікті демеушілік ету туралы ескерту хабарламасын іске қосады немесе "
+-"сөндіреді."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Демеушілік ету туралы ескерту соңғы рет көрсетілген уақыт"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Демеушілік ету туралы ескерту соңғы рет көрсетілген уақыт белгісі."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1594,26 +1576,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Бұл компьютерде тек %s диск орны қалды."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "GNOME жобасына қолдау көрсету"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project for "
+-"future generations."
+-msgstr ""
+-"GNOME-ға сіздің көмегіңіз қажет. Сіздің демеушілігіңіз біздің ашық бастапқы "
+-"кодты жобамызды болашақ ұрпақтар үшін сақтап қалуға көмектеседі."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:88
+-msgid "Donate"
+-msgstr "Демеушілік ету"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/ko.po
++++ b/po/ko.po
+@@ -519,22 +519,6 @@
+ "시간을 분 단위로 지정합니다. 이 시간만큼 지나기 전에는 볼륨에 대해 같은 경고"
+ "가 나타나지 않습니다."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "기부 안내를 사용할지 여부"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "낮은 빈도의 기부 안내를 사용하거나 하지 않습니다."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "최근 기부 안내 표시한 시각"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "최근 기부 안내 표시한 타임스탬프."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1558,24 +1542,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "이 컴퓨터에 디스크 공간이 %s 밖에 남지 않았습니다."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "그놈 프로젝트 도움 주기"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr "그놈 프로젝트는 여러분의 도움이 필요합니다. 지금 기부해 보세요."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "그놈"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "기부"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/ku.po
++++ b/po/ku.po
+@@ -6,7 +6,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center.HEAD\n"
++"Project-Id-Version: honk-settings.HEAD\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2007-03-04 18:21+0100\n"
+--- a/po/lo.po
++++ b/po/lo.po
+@@ -471,22 +471,6 @@
+ "more often than this period."
+ msgstr "ລະບຸເວລາເປັນນາທີ. ການເຕືອນຄັ້ງຕໍ່ໄປສຳລັບ volume ຈະບໍ່ປາກົດຂຶ້ນເລື້ອຍກວ່າໄລຍະເວລານີ້."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "ເປີດໃຊ້ການແຈ້ງເຕືອນການບໍລິຈາກຫຼືບໍ່"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "ເປີດ ຫຼື ປິດການແຈ້ງເຕືອນການບໍລິຈາກທີ່ມີຄວາມຖີ່ຕ່ຳ."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "ເວລາຫຼ້າສຸດທີ່ການແຈ້ງເຕືອນການບໍລິຈາກໄດ້ສະແດງ"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "ເວລາທີ່ການແຈ້ງເຕືອນການບໍລິຈາກໄດ້ສະແດງຄັ້ງຫຼ້າສຸດ."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1472,24 +1456,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "ຄອມພິວເຕີເຄື່ອງນີ້ມີພື້ນທີ່ດິສເຫຼືອພຽງ %s."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "ສະໜັບສະໜູນ GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr "GNOME ຕ້ອງການຄວາມຊ່ວຍເຫຼືອຈາກທ່ານ. ການບໍລິຈາກຂອງທ່ານຈະຊ່ວຍໃຫ້ໂຄງການ open source ຂອງພວກເຮົາສືບຕໍ່ໄປສູ່ຄົນລຸ້ນຕໍ່ໄປ."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "ບໍລິຈາກ"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/lt.po
++++ b/po/lt.po
+@@ -543,22 +543,6 @@
+ "Nurodykite laiką minutėmis. Tolesni pranešimai skirsniui bus rodomi ne "
+ "dažniau kaip tokiu periodu."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Ar aukojimo priminimai yra įjungti"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Įjungia arba išjungia mažo dažnio aukojimo priminimus."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Kada paskutinį kartą parodytas aukojimo priminimas"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Paskutinio aukojimo priminimo parodymo laiko žyma"
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1589,26 +1573,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Kompiuteryje liko tik %s vietos."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "Paremti GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME reikia jūsų pagalbos. Jūsų auka padės palaikyti mūsų atviro kodo "
+-"projektą ateities kartoms."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "Paaukoti"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/mg.po
++++ b/po/mg.po
+@@ -6,7 +6,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center HEAD\n"
++"Project-Id-Version: honk-settings HEAD\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2006-05-23 22:19+0300\n"
+--- a/po/mi.po
++++ b/po/mi.po
+@@ -472,22 +472,6 @@
+ "more often than this period."
+ msgstr ""
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr ""
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr ""
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr ""
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1473,24 +1457,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr ""
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr ""
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr ""
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:88
+-msgid "Donate"
+-msgstr ""
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/ms.po
++++ b/po/ms.po
+@@ -3,7 +3,7 @@
+ # 2. Khairulanuar Abd Majid (khai) <khairul@ikhlas.com>, 2002
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center HEAD\n"
++"Project-Id-Version: honk-settings HEAD\n"
+ "Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/gnome-settings-daemon/"
+ "issues\n"
+ "POT-Creation-Date: 2020-01-18 13:37+0000\n"
+--- a/po/nb.po
++++ b/po/nb.po
+@@ -519,22 +519,6 @@
+ "Angi en tid i minutter. Etterfølgende advarsler for en volum vil ikke vises "
+ "oftere enn dette tidsrommet."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Om påminnelser om donasjoner er aktivert"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Aktiverer eller deaktiverer lavfrekvente donasjonspåminnelser."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Sist gang påminnelsen om donasjon ble vist"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Tidspunkt for siste gang en donasjonspåminnelse ble vist."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1561,26 +1545,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Enheten har bare %s lagringsplass igjen."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Støtt GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME trenger din hjelp. Din gave vil opprettholde vårt prosjekt med åpen "
+-"kildekode for fremtidige generasjoner."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:88
+-msgid "Donate"
+-msgstr "Støtt"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/nl.po
++++ b/po/nl.po
+@@ -560,22 +560,6 @@
+ "Specificeer een tijd in minuten, zodat waarschuwingen voor een volume niet "
+ "vaker zullen verschijnen dan deze periode."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Of donatieherinneringen ingeschakeld zijn"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Schakelt de infrequente herinnering om te doneren in of uit."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Laatste keer dat de donatieherinnering getoond werd"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Tijdstip van de laatste keer dat een donatieherinnering getoond werd."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1630,26 +1614,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Deze computer heeft nog maar %s schijfruimte over."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Ondersteun GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME heeft uw hulp nodig. Uw donatie zal ons open source-project voor "
+-"toekomstige generaties ondersteunen."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Doneren"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/nso.po
++++ b/po/nso.po
+@@ -6,7 +6,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center HEAD\n"
++"Project-Id-Version: honk-settings HEAD\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2004-11-27 17:02+0200\n"
+--- a/po/oc.po
++++ b/po/oc.po
+@@ -562,23 +562,6 @@
+ "Indica un interval en minutas. Aqueste paramètre constituís l'interval de "
+ "temps minimum entre mantuna alèrtas per un meteis volum."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Se los rapèls de donacion son activats"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Activa o desactiva la notificacion de rapèl bassa frequéncia de donacion."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Darrièr còp que lo rapèl de donacion apareguèt"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Orodatage del darrièr còp que lo rapèl de donacion foguèt afichat."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1617,26 +1600,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Aqueste ordenador a pas mai que %s d'espaci de disc disponible."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Sosténer GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME a besonh de vòstra ajuda. Vòstra donacion sostendrà nòstre projècte de "
+-"logicial liure per las generacions futuras."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Far un don"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/pl.po
++++ b/po/pl.po
+@@ -551,24 +551,6 @@
+ "Określenie czasu w minutach. Kolejne ostrzeżenia dla woluminu nie będą "
+ "pojawiały się częściej niż ten okres."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Czy przypomnienia o przekazaniu datku są włączone"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Włącza lub wyłącza sporadyczne powiadomienie przypominające o przekazaniu "
+-"datku."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Czas ostatniego wyświetlenia przypomnienia o datku"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Czas ostatniego wyświetlenia przypomnienia o datku."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1614,26 +1596,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Ten komputer ma tylko %s wolnego miejsca."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "Wesprzyj GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME potrzebuje Twojej pomocy. Twój datek pomoże rozwijać nasz projekt open "
+-"source dla przyszłych pokoleń."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "Przekaż datek"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/pt.po
++++ b/po/pt.po
+@@ -542,22 +542,6 @@
+ "Especifique um período em minutos. Avisos subsequentes para uma unidade não "
+ "serão apresentados mais frequentemente do que este período."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Se os lembretes de doação estão activos"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Ativa ou desactiva os lembretes de doação de baixa frequência."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Última vez que o lembrete de doação foi mostrado"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Marca temporal da última vez que um lembrete de doação foi exibido."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1591,26 +1575,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Este computador só tem %s de espaço disponível."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Apoie o GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"O GNOME necessita da sua ajuda. O seu donativo vai suportar o nosso projeto "
+-"de código aberto por gerações futuras."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Donativo"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/pt_BR.po
++++ b/po/pt_BR.po
+@@ -573,24 +573,6 @@
+ "Especifique um tempo em minutos. Avisos subsequentes para um volume não "
+ "aparecerão com mais frequência que este período."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Se os lembretes de doação estão habilitados"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Habilita ou desabilita a baixa frequência de notificações dos lembretes de "
+-"doação."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Última vez em que os lembretes de doação foram exibidos"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Data e hora da última vez que um lembrete de doação foi exibido."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1628,26 +1610,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Este computador tem apenas %s de espaço em disco restante."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Contribua para o GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"O GNOME precisa de sua ajuda. Sua doação vai sustentar nosso projeto de "
+-"código aberto para as futuras gerações."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Doar"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/ro.po
++++ b/po/ro.po
+@@ -4,7 +4,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center\n"
++"Project-Id-Version: honk-settings\n"
+ "Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/gnome-settings-daemon/"
+ "issues/\n"
+ "POT-Creation-Date: 2025-09-14 11:26+0000\n"
+@@ -553,23 +553,6 @@
+ "Specifică un interval de timp în minute. Avertizări repetate pentru un volum "
+ "nu vor apărea mai des decât acest interval."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Dacă să fie activate reamintirile privind donarea"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Activează sau dezactivează înștiințarea cu frecvență redusă privind donarea."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Data ultimei înștiințări privind donarea"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Ultima dată când a fost afișată reamintirea privind donarea."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1613,26 +1596,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Acest calculator mai are doar %s spațiu liber pe disc."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Susține GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME are nevoie de ajutorul tău. Donația ta va susține proiectul nostru, "
+-"care are codul sursă public, pentru generațiile viitoare."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Donează"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/ru.po
++++ b/po/ru.po
+@@ -567,22 +567,6 @@
+ "Укажите время в минутах. Последующие предупреждения об объёме свободного "
+ "места для раздела не будут отображаться чаще, чем один раз в этот период."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Включены ли напоминания о пожертвованиях"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Включает или отключает редкое напоминание о пожертвовании."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Последний раз, когда напоминание о пожертвовании было показано"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Отметка времени последнего раза, когда напоминание о пожертвовании было показано."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1637,26 +1621,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "На компьютере осталось всего %s свободного места."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "Поддержать GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME нужна ваша помощь. Ваше пожертвование поможет поддержать наш "
+-"проект с открытым исходным кодом для будущих поколений."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "Пожертвовать"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/rw.po
++++ b/po/rw.po
+@@ -13,7 +13,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center HEAD\n"
++"Project-Id-Version: honk-settings HEAD\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2005-03-31 20:55-0700\n"
+--- a/po/sk.po
++++ b/po/sk.po
+@@ -614,22 +614,6 @@
+ "Zadajte čas v minútach. Nasledujúce upozornenia pre zväzok sa nezobrazia "
+ "častejšie ako s touto periódou."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Či sú povolené pripomenutia darov"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Povolí alebo zakáže menej časté pripomienky týkajúce sa daru."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Kedy sa naposledy zobrazilo pripomenutie daru"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Časová pečiatka posledného zobrazenia pripomenutia daru."
+-
+ # summary
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+@@ -1829,26 +1813,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Na tomto počítači zostáva už len %s diskového priestoru."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Podporte GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME potrebuje vašu pomoc. Váš dar pomôže udržať náš open‑source projekt "
+-"pre budúce generácie."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:88
+-msgid "Donate"
+-msgstr "Venovať dar"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/sl.po
++++ b/po/sl.po
+@@ -542,23 +542,6 @@
+ "more often than this period."
+ msgstr "Določitev pogostosti pojavljanja opozoril za razdelek v minutah."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Ali so opomniki za donacije omogočeni"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Omogoči ali onemogoči obvestilo o opomniku za nizkofrekvenčno donacijo."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Zadnjič, ko je bil prikazan opomnik za donacijo"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Časovni žig zadnjega prikaza opomnika za donacijo."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1607,26 +1590,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Računalnik ima na voljo še %s prostora na disku."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "Podprite GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME potrebuje vašo pomoč. Vaša donacija bo ohranila naš odprtokodni "
+-"projekt za prihodnje generacije."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "Donirajte"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/sq.po
++++ b/po/sq.po
+@@ -6,7 +6,7 @@
+ # Elian Myftiu <elian@alblinux.net>, 2003, 2004, 2005, 2006.
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center HEAD\n"
++"Project-Id-Version: honk-settings HEAD\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2006-04-19 12:33+0200\n"
+--- a/po/sr.po
++++ b/po/sr.po
+@@ -11,7 +11,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center\n"
++"Project-Id-Version: honk-settings\n"
+ "Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/gnome-settings-daemon/"
+ "issues/\n"
+ "POT-Creation-Date: 2025-10-08 19:58+0000\n"
+@@ -542,23 +542,6 @@
+ "Одредите време у минутима. Накнадна упозорења за волумен се неће појављивати "
+ "пре овог периода."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Да ли су подсетници за донације омогућени"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Омогућава или искључује повремено обавештење о подсетнику за донације."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Последњи пут када је приказан подсетник за донацију"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr ""
+-"Временска ознака последњег пута када је приказан подсетник за донацију."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1602,26 +1585,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Овај рачунар има само %s преосталог простора."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Подржи Гном"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"Гному је потребна твоја помоћ. Твоја донација ће одржати наш пројекат "
+-"отвореног кода за будуће генерације."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "Гном"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Донирај"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/sr@latin.po
++++ b/po/sr@latin.po
+@@ -11,7 +11,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center\n"
++"Project-Id-Version: honk-settings\n"
+ "Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/gnome-settings-daemon/"
+ "issues/\n"
+ "POT-Creation-Date: 2025-10-08 19:58+0000\n"
+@@ -542,23 +542,6 @@
+ "Odredite vreme u minutima. Naknadna upozorenja za volumen se neće pojavljivati "
+ "pre ovog perioda."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Da li su podsetnici za donacije omogućeni"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "Omogućava ili isključuje povremeno obaveštenje o podsetniku za donacije."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Poslednji put kada je prikazan podsetnik za donaciju"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr ""
+-"Vremenska oznaka poslednjeg puta kada je prikazan podsetnik za donaciju."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1602,26 +1585,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Ovaj računar ima samo %s preostalog prostora."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "Podrži Gnom"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"Gnomu je potrebna tvoja pomoć. Tvoja donacija će održati naš projekat "
+-"otvorenog koda za buduće generacije."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "Gnom"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "Doniraj"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/sv.po
++++ b/po/sv.po
+@@ -546,23 +546,6 @@
+ "Ange en tid i minuter. Efterföljande varningar för en volym kommer inte att "
+ "visas oftare än denna tidsperiod."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Huruvida donationspåminnelser är aktiverade"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Aktiverar eller inaktiverar den lågfrekvent visade donationspåminnelsen."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Senast som donationspåminnelsen visades"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Tidsstämpeln för den senaste tiden som en donationspåminnelse visades."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1601,26 +1584,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Denna dator har endast %s diskutrymme kvar."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "Stöd GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME behöver din hjälp. Din donation kommer stödja vårt öppen "
+-"källkodsprojekt för framtida generationer."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "Donera"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/th.po
++++ b/po/th.po
+@@ -413,22 +413,6 @@
+ msgid "Specify a time in minutes. Subsequent warnings for a volume will not appear more often than this period."
+ msgstr "ระบุเวลาเป็นนาที การเตือนเกี่ยวกับเนื้อที่ว่างในโวลุมในครั้งถัด ๆ ไป จะถี่ไม่เกินช่วงที่กำหนดนี้"
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "กำหนดว่าจะเปิดใช้การแจ้งเตือนการบริจาคหรือไม่"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "เปิดหรือปิดใช้การแจ้งเตือนการบริจาคที่มีความถี่ต่ำ"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "ครั้งล่าสุดที่แสดงการแจ้งเตือนการบริจาค"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "ไทม์สแตมป์สำหรับเวลาครั้งล่าสุดที่แสดงการแจ้งเตือนการบริจาค"
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6 data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154 data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+ msgid "Launch calculator"
+ msgstr "เรียกเครื่องคิดเลข"
+@@ -1280,22 +1264,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "คอมพิวเตอร์เครื่องนี้มีเนื้อที่ว่างเหลือเพียง %s"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "สนับสนุน GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid "GNOME needs your help. Your donation will sustain our open source project for future generations."
+-msgstr "GNOME ต้องการความช่วยเหลือจากคุณ การบริจาคของคุณจะช่วยให้โครงการโอเพนซอร์สของเรายั่งยืนสำหรับคนรุ่นถัดไป"
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "บริจาค"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/tr.po
++++ b/po/tr.po
+@@ -554,24 +554,6 @@
+ "Dakika olarak bir süre belirleyin. Bir birim için birbirini izleyen uyarılar "
+ "bu dönemden daha sık gösterilmeyecek."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Bağış anımsatıcılarının etkin olma durumu"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Düşük sıklıktaki bağış anımsatma bildirimini etkinleştirir ya da devre dışı "
+-"bırakır."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "Bağış anımsatıcının en son gösterildiği zaman"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "Bağış anımsatıcının en son gösterildiği zaman damgası."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1607,26 +1589,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "Bu bilgisayarda yalnızca %s disk alanı kaldı."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "GNOMEʼu Destekle"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME yardımınıza gereksiniyor. Bağışınız açık kaynak projemizi gelecek "
+-"nesiller için sürdürecektir."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:88
+-msgid "Donate"
+-msgstr "Bağış Yap"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/ug.po
++++ b/po/ug.po
+@@ -410,22 +410,6 @@
+ msgid "Specify a time in minutes. Subsequent warnings for a volume will not appear more often than this period."
+ msgstr "مىنۇتنى بىرلىك قىلىپ ۋاقىت بەلگىلىنىدۇ. مۇشۇ دەۋرىيلىكتە مەلۇم دىسكىنىڭ كېيىنكى ئاگاھلاندۇرۇشىنى كۆپ قېتىم كۆرسەتمەيدۇ."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "ئىئانە ئەسكەرتىشى قوزغىتىلدىمۇ يوق"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "تۆۋەن چاستوتىلىق ئەسكەرتىش ئۇقتۇرۇشىنى قوزغىتىدۇ ياكى چەكلەيدۇ."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "ئاخىرقى قېتىم ئىئانە ئەسكەرتىشىنى كۆرسەتكەن ۋاقىت"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "ئاخىرقى قېتىم ئىئانە ئەسكەرتىشىنى كۆرسەتكەن ۋاقىتنىڭ ۋاقىت تامغىسى."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6 data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154 data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+ msgid "Launch calculator"
+ msgstr "ھېسابلىغۇچنى قوزغات"
+@@ -1271,22 +1255,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "كومپيۇتېردا ئاران %s بوشلۇق قالدى."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "GNOME نى قوللاش"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid "GNOME needs your help. Your donation will sustain our open source project for future generations."
+-msgstr "GNOME ياردىمىڭىزگە موھتاج. ئىئانىڭىز ئوچۇق كودلۇق قۇرۇلۇشنىڭ كەلگۈسىدە داۋاملىشىشىغا ياردەم بېرىدۇ."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:89
+-msgid "Donate"
+-msgstr "ئىئانە"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/uk.po
++++ b/po/uk.po
+@@ -6,7 +6,7 @@
+ # Yuri Chornoivan <yurchor@ukr.net>, 2020, 2021, 2022, 2023, 2024, 2025.
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center\n"
++"Project-Id-Version: honk-settings\n"
+ "Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/gnome-settings-daemon/is"
+ "sues/\n"
+ "POT-Creation-Date: 2025-09-04 15:49+0000\n"
+@@ -540,27 +540,6 @@
+ "Вкажіть час у хвилинах. Подальші попередження про заповнення тому не "
+ "виводитимуться частіше ніж цей період."
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "Визначає, чи має бути увімкнено нагадування щодо пожертв"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr ""
+-"Вмикає або вимикає сповіщення-нагадування про фінансову пожертву з низькою"
+-" частотою."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr ""
+-"Момент часу, коли нагадування про фінансову пожертву було показано востаннє."
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr ""
+-"Часова позначка, коли нагадування щодо фінансової пожертви було показано"
+-" востаннє."
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1620,26 +1599,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "На комп'ютері залишилось лише %s дискового простору."
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:70
+-msgid "Support GNOME"
+-msgstr "Підтримка GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:71
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr ""
+-"GNOME потребує вашої підтримки. Ваша пожертва підтримає наш проєкт з"
+-" відкритим кодом у майбутньому."
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:79
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:87
+-msgid "Donate"
+-msgstr "Фінансова підтримка"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/wa.po
++++ b/po/wa.po
+@@ -11,7 +11,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center 1.5.5\n"
++"Project-Id-Version: honk-settings 1.5.5\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2003-01-02 12:26+0100\n"
+--- a/po/xh.po
++++ b/po/xh.po
+@@ -6,7 +6,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center\n"
++"Project-Id-Version: honk-settings\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2005-03-23 09:53+0200\n"
+--- a/po/zh_CN.po
++++ b/po/zh_CN.po
+@@ -511,22 +511,6 @@
+ "more often than this period."
+ msgstr "以分钟为单位指定某个时间。该周期内不会多次显示某个卷的后续警告。"
+ 
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:33
+-msgid "Whether donation reminders are enabled"
+-msgstr "是否启用捐助提醒"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:34
+-msgid "Enables or disables the low-frequency donation reminder notification."
+-msgstr "启用或禁用低频率的捐助提醒通知。"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:38
+-msgid "Last time the donation reminder was shown"
+-msgstr "上次显示捐助提醒的时间"
+-
+-#: data/org.gnome.settings-daemon.plugins.housekeeping.gschema.xml.in:39
+-msgid "Timestamp for the last time a donation reminder was shown."
+-msgstr "上次显示捐助提醒的时间戳。"
+-
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:6
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:154
+ #: data/org.gnome.settings-daemon.plugins.media-keys.gschema.xml.in:440
+@@ -1533,24 +1517,10 @@
+ msgid "This computer has only %s disk space remaining."
+ msgstr "此计算机仅剩余 %s 的硬盘空间。"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:72
+-msgid "Support GNOME"
+-msgstr "支持 GNOME"
+-
+-#: plugins/housekeeping/gsd-donation-reminder.c:73
+-msgid ""
+-"GNOME needs your help. Your donation will sustain our open source project "
+-"for future generations."
+-msgstr "GNOME 需要您的帮助。您的捐助将帮助我们的项目在未来时代继续下去。"
+-
+ #: plugins/housekeeping/gsd-donation-reminder.c:81
+ msgid "GNOME"
+ msgstr "GNOME"
+ 
+-#: plugins/housekeeping/gsd-donation-reminder.c:88
+-msgid "Donate"
+-msgstr "捐助"
+-
+ #. TRANSLATORS: %s is the application name.
+ #: plugins/housekeeping/gsd-systemd-notify.c:82
+ #, c-format
+--- a/po/zu.po
++++ b/po/zu.po
+@@ -6,7 +6,7 @@
+ #
+ msgid ""
+ msgstr ""
+-"Project-Id-Version: gnome-control-center HEAD\n"
++"Project-Id-Version: honk-settings HEAD\n"
+ "Report-Msgid-Bugs-To: \n"
+ "POT-Creation-Date: 2008-02-26 21:06-0500\n"
+ "PO-Revision-Date: 2004-12-13 19:02+0200\n"
+--- a/tests/gsdtestcase.py
++++ b/tests/gsdtestcase.py
+@@ -365,8 +365,8 @@
+                 klass.xauth = f.readline().strip()
+                 print("Using X11 display %s" % (klass.x11_display))
+ 
+-        klass.wait_for_bus_object('org.gnome.Mutter.IdleMonitor',
+-                                 '/org/gnome/Mutter/IdleMonitor/Core',
++        klass.wait_for_bus_object('org.honk.HWin.IdleMonitor',
++                                 '/org/honk/HWin/IdleMonitor/Core',
+                                  timeout=100)
+ 
+     @classmethod
+@@ -446,6 +446,6 @@
+         '''trigger activity to reset idle timer'''
+ 
+         obj_mutter_idlemonitor = klass.session_bus_con.get_object(
+-            'org.gnome.Mutter.IdleMonitor', '/org/gnome/Mutter/IdleMonitor/Core')
++            'org.honk.HWin.IdleMonitor', '/org/honk/HWin/IdleMonitor/Core')
+ 
+-        obj_mutter_idlemonitor.ResetIdletime(dbus_interface='org.gnome.Mutter.IdleMonitor')
++        obj_mutter_idlemonitor.ResetIdletime(dbus_interface='org.honk.HWin.IdleMonitor')

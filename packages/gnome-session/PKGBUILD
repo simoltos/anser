@@ -1,0 +1,70 @@
+# Adapted from the Arch Linux packaging recipe for the Honk integration.
+# shellcheck shell=bash
+# shellcheck disable=SC2034,SC2154
+# Patch source: https://github.com/simoltos/honk/tree/2e1041b240256c733481f3732b3b790a1b2203d9/shell/data/compatibility
+# Maintainer: Fabian Bornschein <fabiscafe@archlinux.org>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+pkgname=gnome-session
+pkgver=51.0
+pkgrel=5
+pkgdesc="The GNOME Session Handler"
+url="https://gitlab.gnome.org/GNOME/gnome-session"
+arch=(x86_64)
+license=(GPL-2.0-or-later)
+depends=(
+  dconf
+  glib2
+  glibc
+  gnome-desktop-4
+  gsettings-desktop-schemas
+  libgcc
+  systemd-libs
+  xdg-desktop-portal-gnome
+)
+makedepends=(
+  docbook-xsl
+  git
+  glib2-devel
+  libxslt
+  meson
+  xmlto
+)
+optdepends=('gnome-keyring: Secrets service backend')
+conflicts=(gnome-mimeapps)
+replaces=(gnome-mimeapps)
+provides=(gnome-mimeapps honk-session-51)
+groups=(gnome)
+source=(
+  'gnome-session-51.0.tar.xz::https://download.gnome.org/sources/gnome-session/51/gnome-session-51.0.tar.xz'
+  'gnome-session-51.0.patch'
+)
+sha256sums=(
+  '5195c4f60542a953ab6ebd288f3785b8e7746292d8c167e0c99d353438a184d1'
+  'dc118f0f81c705b6ed8ad8ae9c588ba5c1a81e42db3cd6287b0ad4bdc0c10eec'
+)
+
+prepare() {
+  patch -d "$srcdir/gnome-session-51.0" -Np1 -i "$srcdir/gnome-session-51.0.patch"
+}
+
+build() {
+  local meson_options=(
+    -D docbook=true
+    -D man=true
+  )
+
+  arch-meson "$srcdir/gnome-session-51.0" build "${meson_options[@]}"
+  meson compile -C build
+}
+
+check() {
+  meson test -C build --print-errorlogs
+}
+
+package() {
+  meson install -C build --no-rebuild --destdir "$pkgdir"
+  rm -f "$pkgdir/usr/share/wayland-sessions/gnome.desktop"
+}
+
+# vim:set sw=2 sts=-1 et:

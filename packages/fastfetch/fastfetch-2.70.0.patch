@@ -1,0 +1,28 @@
+--- a/src/detection/displayserver/linux/wmde.c
++++ b/src/detection/displayserver/linux/wmde.c
+@@ -101,6 +101,11 @@
+         ffStrEndsWithIgnCase(name, "-kwin_wayland") ||
+         ffStrEndsWithIgnCase(name, "-kwin_x11")) {
+         ffStrbufSetS(&result->wmPrettyName, FF_WM_PRETTY_KWIN);
++    } else if (
++        ffStrEqualsIgnCase(name, "honk-shell") ||
++        ffStrEqualsIgnCase(name, "honk shell") ||
++        ffStrEqualsIgnCase(name, "hwin")) {
++        ffStrbufSetS(&result->wmPrettyName, "HWin");
+     } else if (
+         ffStrEqualsIgnCase(name, "gnome-shell") ||
+         ffStrEqualsIgnCase(name, "gnome shell") ||
+@@ -194,6 +199,13 @@
+     }
+ 
+     else if (
++        ffStrEqualsIgnCase(name, "Honk") ||
++        ffStrEqualsIgnCase(name, "honk-shell")) {
++        ffStrbufSetStatic(&result->deProcessName, "honk-shell");
++        ffStrbufSetStatic(&result->dePrettyName, "Honk");
++    }
++
++    else if (
+         ffStrEqualsIgnCase(name, "GNOME") ||
+         ffStrEqualsIgnCase(name, "ubuntu:GNOME") ||
+         ffStrEqualsIgnCase(name, "ubuntu") ||
