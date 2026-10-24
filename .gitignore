@@ -1,0 +1,15 @@
+tools/
+.cache/
+repo/
+out/
+history/
+__pycache__/
+.SRCINFO
+packages/*/src/
+packages/*/pkg/
+packages/*/*.pkg.tar.*
+packages/*/*.src.tar.*
+packages/*/*.tar.*
+packages/*/*.zip
+packages/*/*.part
+packages/*/*.log

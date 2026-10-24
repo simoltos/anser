@@ -1,0 +1,52 @@
+# Installed Anser system: explicit functional choices, one package per line.
+# mkanseriso adds Cenere and live-only tools to its generated ISO profile.
+# Dependencies are resolved by pacman; OCA remains available from the repo only.
+
+# Base system and administration
+base
+nano
+opendoas
+vim
+
+# Signed repositories, one kernel and hardware support
+amd-ucode
+intel-ucode
+linux
+linux-firmware
+linux-firmware-marvell
+nvidia-open
+sof-firmware
+
+# Installed-system boot, filesystems and encryption
+btrfs-progs
+cryptsetup
+dosfstools
+e2fsprogs
+efibootmgr
+exfatprogs
+grub
+mkinitcpio
+ntfs-3g
+os-prober
+
+# Default desktop and applications
+firefox
+gdm
+gnome-backgrounds
+gnome-console
+gnome-keyring
+honk-settings
+honk-shell
+hwin
+noto-fonts
+noto-fonts-emoji
+
+# Network, audio and Bluetooth
+alsa-utils
+bluez
+bluez-utils
+gnome-bluetooth-3.0
+networkmanager
+pipewire-alsa
+pipewire-pulse
+wireplumber
