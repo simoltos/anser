@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Restore the distribution identity after package transactions.
+install -m 0644 /usr/share/anser/os-release /usr/lib/os-release
+rm -f /etc/os-release
+ln -s ../usr/lib/os-release /etc/os-release
+if [[ -f /etc/lsb-release ]]; then
+    printf 'DISTRIB_ID=Anser\nDISTRIB_RELEASE=rolling\nDISTRIB_CODENAME=rolling\nDISTRIB_DESCRIPTION="Anser"\n' > /etc/lsb-release
+fi
+for issue in /etc/issue /usr/share/factory/etc/issue; do
+    [[ ! -f $issue ]] || printf 'Anser (\\l)\n\n' > "$issue"
+done
+
+# Keep installed utilities available while hiding their diagnostic launchers.
+# Refresh complete overrides from the package's current file after upgrades.
+for launcher in avahi-discover bssh bvnc qv4l2 qvidcap org.gnome.ColorProfileViewer org.freedesktop.IBus.Setup; do
+    source_file="/usr/share/applications/$launcher.desktop"
+    override_file="/usr/local/share/applications/$launcher.desktop"
+    if [[ -f $source_file ]]; then
+        install -d -m0755 /usr/local/share/applications
+        awk '
+            /^\[Desktop Entry\]$/ { entry=1; print; print "NoDisplay=true"; next }
+            /^\[/ { entry=0 }
+            entry && /^NoDisplay=/ { next }
+            { print }
+        ' "$source_file" > "$override_file"
+        chmod 0644 "$override_file"
+    else
+        rm -f -- "$override_file"
+    fi
+done

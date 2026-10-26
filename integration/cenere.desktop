@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Install Anser
+Comment=Install this Anser system onto a disk
+Exec=kgx --title "Install Anser" -- doas /usr/bin/cenere
+Icon=system-software-install
+Terminal=false
+Categories=System;

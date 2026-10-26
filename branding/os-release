@@ -1,0 +1,6 @@
+NAME="Anser"
+PRETTY_NAME="Anser"
+ID=anser
+ID_LIKE=arch
+BUILD_ID=rolling
+LOGO=computer

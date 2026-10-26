@@ -1,0 +1,15 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = filesystem
+Target = lsb-release
+Target = avahi
+Target = v4l-utils
+Target = gnome-color-manager
+
+[Action]
+Description = Preserve Anser identity and application visibility
+When = PostTransaction
+Depends = bash
+Exec = /usr/local/bin/anser-branding

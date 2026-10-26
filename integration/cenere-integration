@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Distribution-specific live cleanup, desktop, services and privilege policy.
+# Cenere calls this supplied image material; the installer owns no Anser policy.
+set -euo pipefail
+(( EUID == 0 && $# == 6 )) || exit 2
+action=$1 user=$2 layout=$3 variant=$5 options=$6
+# Values originate in systemd's keyboard map and are passed without a shell.
+IFS=, read -ra layouts <<< "$layout"
+IFS=, read -ra variants <<< "$variant"
+sources='['
+for i in "${!layouts[@]}"; do
+    code=${layouts[$i]}
+    [[ -z ${variants[$i]:-} ]] || code+="+${variants[$i]}"
+    [[ $sources == '[' ]] || sources+=', '
+    sources+="('xkb', '$code')"
+done
+sources+=']'
+xkb_options='['
+IFS=, read -ra option_list <<< "$options"
+for option in "${option_list[@]}"; do
+    [[ -n $option ]] || continue
+    [[ $xkb_options == '[' ]] || xkb_options+=', '
+    xkb_options+="'$option'"
+done
+xkb_options+=']'
+
+set_keyboard() {
+    local account=$1 uid
+    uid=$(id -u "$account")
+    local -a session=(dbus-run-session --)
+    if [[ $action == keyboard && -S /run/user/$uid/bus ]]; then
+        session=(env "XDG_RUNTIME_DIR=/run/user/$uid" "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus")
+    fi
+    # Prevent GIO from autostarting GVFS/FUSE inside the offline target.
+    # shellcheck disable=SC2016 # The child shell expands its positional arguments.
+    runuser -u "$account" -- env GIO_USE_VFS=local "${session[@]}" /bin/bash -eu -c '
+        gsettings set org.gnome.desktop.input-sources sources "$1"
+        gsettings set org.gnome.desktop.input-sources mru-sources "$1"
+        gsettings set org.gnome.desktop.input-sources xkb-options "$2"
+    ' anser-keyboard "$sources" "$xkb_options"
+
+}
+
+case $action in
+    keyboard)
+        [[ -z $user ]] || set_keyboard "$user"
+        ;;
+    configure)
+        # Remove only this image's live configuration, outside preserved home.
+        rm -rf -- /etc/mkinitcpio.conf.d/archiso.conf \
+            /etc/polkit-1/rules.d/49-nopasswd_global.rules \
+            /etc/ssh/sshd_config.d/10-archiso.conf \
+            /etc/systemd/logind.conf.d/do-not-suspend.conf \
+            /etc/systemd/journald.conf.d/volatile-storage.conf \
+            /etc/systemd/system/pacman-init.service \
+            /etc/systemd/system/multi-user.target.wants/pacman-init.service \
+            /etc/systemd/system/etc-pacman.d-gnupg.mount \
+            /etc/systemd/system/local-fs.target.wants/etc-pacman.d-gnupg.mount \
+            /etc/systemd/system/livecd-talk.service \
+            /etc/systemd/system/multi-user.target.wants/livecd-talk.service \
+            /etc/systemd/system/livecd-alsa-unmuter.service \
+            /etc/systemd/system/sound.target.wants/livecd-alsa-unmuter.service \
+            /etc/systemd/system/systemd-time-wait-sync.service.d \
+            /etc/systemd/system/sysinit.target.wants/systemd-time-wait-sync.service \
+            /etc/systemd/system/systemd-firstboot.service \
+            /etc/systemd/system/systemd-time-wait-sync.service \
+            /etc/systemd/system/archlinux-keyring-wkd-sync.timer \
+            /etc/systemd/system/multi-user.target.wants/sshd.service \
+            /etc/pacman.d/hooks/uncomment-mirrors.hook \
+            /usr/share/applications/cenere.desktop \
+            /etc/systemd/system/getty@tty1.service.d /etc/sudoers.d \
+            /var/lib/AccountsService/users/liveuser
+        printf '[daemon]\nFallbackSession=honk\n' > /etc/gdm/custom.conf
+        printf 'permit persist :wheel as root\n' > /etc/doas.conf
+        chmod 0400 /etc/doas.conf
+        printf 'Anser\n' > /etc/motd
+        ln -sfn /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+        systemctl enable gdm.service NetworkManager.service systemd-resolved.service bluetooth.service honk-power.service honk-background.service
+        systemctl set-default graphical.target
+        set_keyboard "$user"
+        # GDM's system account is created by sysusers on first boot. The same
+        # defaults cover its login screen and any subsequently created account.
+        printf '[org.gnome.desktop.input-sources]\nsources=%s\nmru-sources=%s\nxkb-options=%s\n' \
+            "$sources" "$sources" "$xkb_options" > /usr/share/glib-2.0/schemas/99-anser-keyboard.gschema.override
+        glib-compile-schemas --strict /usr/share/glib-2.0/schemas
+        ;;
+    *) exit 2 ;;
+esac

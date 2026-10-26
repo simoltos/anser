@@ -1,0 +1,16 @@
+[Unit]
+Description=Activate the signed local repository explicitly requested by the VM launcher
+ConditionVirtualization=vm
+After=systemd-modules-load.service NetworkManager.service systemd-resolved.service pacman-init.service
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStartPre=-/usr/bin/modprobe qemu_fw_cfg
+ExecStart=/usr/bin/python3 /usr/lib/anser/local_repository.py activate
+ExecStop=/usr/bin/python3 /usr/lib/anser/local_repository.py deactivate
+RemainAfterExit=yes
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target
