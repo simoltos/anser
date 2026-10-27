@@ -1,12 +1,13 @@
 # Installed Anser system: explicit functional choices, one package per line.
-# mkanseriso adds Cenere and live-only tools to its generated ISO profile.
-# Dependencies are resolved by pacman; OCA remains available from the repo only.
+# Cenere and live-only tools are added to the generated ISO profile.
+# Provided by current dependencies: diffutils, curl (libcurl), libasan,
+# libubsan and poppler (pdftotext). Recheck when changing this selection.
 
 # Base system and administration
 base
 nano
+neovim
 opendoas
-vim
 
 # Signed repositories, one kernel and hardware support
 amd-ucode
@@ -29,23 +30,60 @@ mkinitcpio
 ntfs-3g
 os-prober
 
+# Terminal tools and documentation
+7zip
+bash-completion
+fastfetch
+fd
+fzf
+jq
+man-db
+man-pages
+ripgrep
+tree
+wl-clipboard
+
+# Project tools
+git
+npm
+python-pillow
+rsync
+shellcheck
+
+# Virtual machines
+qemu-desktop
+
 # Default desktop and applications
+baobab
+decibels
+file-roller
 firefox
 gdm
 gnome-backgrounds
+gnome-calculator
+gnome-calendar
+gnome-clocks
 gnome-console
+gnome-contacts
+gnome-disk-utility
 gnome-keyring
+gnome-system-monitor
 honk-settings
 honk-shell
 hwin
+loupe
 noto-fonts
 noto-fonts-emoji
+papers
+showtime
+snapshot
 
-# Network, audio and Bluetooth
+# Network, audio, video and Bluetooth
 alsa-utils
 bluez
 bluez-utils
 gnome-bluetooth-3.0
+gst-libav
 networkmanager
 pipewire-alsa
 pipewire-pulse
