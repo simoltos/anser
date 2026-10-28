@@ -75,7 +75,7 @@ case $action in
         chmod 0400 /etc/doas.conf
         printf 'Anser\n' > /etc/motd
         ln -sfn /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-        systemctl enable gdm.service NetworkManager.service systemd-resolved.service bluetooth.service honk-power.service honk-background.service
+        systemctl enable gdm.service NetworkManager.service systemd-resolved.service bluetooth.service honk-power.service honk-background.service power-profiles-daemon.service
         systemctl set-default graphical.target
         set_keyboard "$user"
         # GDM's system account is created by sysusers on first boot. The same

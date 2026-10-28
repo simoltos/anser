@@ -16,7 +16,9 @@ linux
 linux-firmware
 linux-firmware-marvell
 nvidia-open
+power-profiles-daemon
 sof-firmware
+zram-generator
 
 # Installed-system boot, filesystems and encryption
 btrfs-progs
