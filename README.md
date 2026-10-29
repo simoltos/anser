@@ -1,8 +1,12 @@
 # Anser
 
-Anser is an Arch based distrubution project that features the
+Anser is an Arch based distrubution that features the
 [Honk](https://github.com/simoltos/honk) desktop environment and offline
 installation through [Cenere](https://github.com/simoltos/cenere).
+
+Download the latest [x86_64 ISO](https://anser-download.simoltos.workers.dev/latest).
+[SHA256 checksum](https://anser-download.simoltos.workers.dev/latest.sha256) and
+[GPG signature](https://anser-download.simoltos.workers.dev/latest.sig) are also available.
 
 This repository contains the package recipes and distribution files
 maintained for Anser:
@@ -30,6 +34,7 @@ The binary repositories are hosted in GitHub releases:
   default.
 
 Both Anser repositories require signatures for packages and databases.
+ISO images are signed with the same key.
 The [public signing key](https://github.com/simoltos/anser/releases/download/anser-x86_64/public.asc)
 has this fingerprint:
 
