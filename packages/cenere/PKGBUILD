@@ -2,27 +2,23 @@
 # Anser packaging; the source and supplied MIT license belong to Cenere.
 # shellcheck disable=SC2034,SC2154
 pkgname=cenere
-pkgver=0.r2.gaaa5a6417593
-pkgrel=4
+pkgver=0.r3.g2738fded6866
+pkgrel=1
 pkgdesc='Guided offline installer for Arch Linux and derivatives'
 arch=('x86_64')
 url='https://github.com/simoltos/cenere'
 license=('MIT')
-_commit=aaa5a6417593d778a9aabb7c335c72a76b2153df
-_patched_commit=2738fded68664d2acba786eedbfc631622f89962
+_commit=2738fded68664d2acba786eedbfc631622f89962
 depends=('arch-install-scripts' 'btrfs-progs' 'bash' 'coreutils' 'cryptsetup' 'dosfstools'
          'e2fsprogs' 'efibootmgr' 'glibc' 'grub' 'json-c' 'kbd' 'mkinitcpio'
          'ntfs-3g' 'ntfsprogs' 'os-prober' 'pacman' 'rsync' 'shadow' 'systemd' 'tzdata' 'util-linux' 'xkeyboard-config')
 checkdepends=('bubblewrap' 'python')
-source=("$pkgname-$_commit.tar.gz::https://codeload.github.com/simoltos/cenere/tar.gz/$_commit"
-        "preservation-and-progress.patch")
-sha256sums=('5491ecf4c03f5805512fccdca5d1753bd106515cd7343a4599138770bdaa15d4'
-            'fe523b346e1c27bef47782315c3f34b0531ca6a4e1427b7e809c3cf681a0b284')
+source=("$pkgname-$_commit.tar.gz::https://codeload.github.com/simoltos/cenere/tar.gz/$_commit")
+sha256sums=('a07a233a3695065781229983328ddb210f14f78410626887bbfaa5dc9d262a54')
 
 prepare() {
-    patch -d "$srcdir/$pkgname-$_commit" -Np1 -i "$srcdir/preservation-and-progress.patch"
-    printf '{\n  "package": "%s",\n  "version": "%s",\n  "git_revision": "%s",\n  "patched_git_revision": "%s",\n  "working_tree_modified": true,\n  "source_archive_sha256": "%s",\n  "patches": {"preservation-and-progress.patch": "%s"},\n  "source_project": "%s"\n}\n' \
-        "$pkgname" "$pkgver-$pkgrel" "$_commit" "$_patched_commit" "${sha256sums[0]}" "${sha256sums[1]}" "$pkgname" \
+    printf '{\n  "package": "%s",\n  "version": "%s",\n  "git_revision": "%s",\n  "working_tree_modified": false,\n  "source_archive_sha256": "%s",\n  "patches": {},\n  "source_project": "%s"\n}\n' \
+        "$pkgname" "$pkgver-$pkgrel" "$_commit" "${sha256sums[0]}" "$pkgname" \
         > "$srcdir/source.json"
 }
 
