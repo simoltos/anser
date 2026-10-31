@@ -77,16 +77,18 @@ loupe
 noto-fonts
 noto-fonts-emoji
 papers
-showtime
 snapshot
+vlc
 
 # Network, audio, video and Bluetooth
 alsa-utils
 bluez
 bluez-utils
+ffmpegthumbnailer
 gnome-bluetooth-3.0
 gst-libav
 networkmanager
 pipewire-alsa
 pipewire-pulse
+vlc-plugin-ffmpeg
 wireplumber
