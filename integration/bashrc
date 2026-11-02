@@ -1,0 +1,9 @@
+# shellcheck shell=bash
+# Anser defaults for new accounts. Existing home configurations are preserved.
+[[ $- == *i* ]] || return
+
+alias ls='ls --color=auto'
+alias grep='grep --color=auto'
+
+# shellcheck source=integration/bash-prompt.sh
+source /etc/profile.d/anser-prompt.sh
