@@ -83,6 +83,8 @@ case $action in
         printf '[org.gnome.desktop.input-sources]\nsources=%s\nmru-sources=%s\nxkb-options=%s\n' \
             "$sources" "$sources" "$xkb_options" > /usr/share/glib-2.0/schemas/99-anser-keyboard.gschema.override
         glib-compile-schemas --strict /usr/share/glib-2.0/schemas
+        /usr/lib/anser/prepare-plymouth
+        /usr/lib/anser/prepare-initramfs.py
         ;;
     *) exit 2 ;;
 esac

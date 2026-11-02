@@ -1,6 +1,6 @@
 # Anser
 
-Anser is an Arch based distrubution that features the
+Anser is an Arch based distribution that features the
 [Honk](https://github.com/simoltos/honk) desktop environment and offline
 installation through [Cenere](https://github.com/simoltos/cenere).
 
@@ -17,7 +17,7 @@ maintained for Anser:
 - [integration/](integration/) contains the Anser setup and live environment
   cleanup used by Cenere, along with support for testing local repositories
   in virtual machines.
-- [branding/](branding/) contains the system identity, login screen branding
+- [branding/](branding/) contains the system identity, boot theme, login screen branding
   and application menu customizations, with a pacman hook that preserves
   the Anser identity after package updates.
 

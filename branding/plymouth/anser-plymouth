@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Refresh upstream Spinner assets before mkinitcpio embeds the Anser theme.
+set -euo pipefail
+theme=/usr/share/plymouth/themes/anser
+install -d -m0755 "$theme"
+install -m0644 /usr/share/plymouth/themes/spinner/*.png "$theme/"
+install -m0644 /usr/share/anser/plymouth-watermark.png "$theme/watermark.png"

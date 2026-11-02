@@ -1,0 +1,12 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = plymouth
+
+[Action]
+Description = Prepare the Anser boot theme
+When = PostTransaction
+Depends = bash
+Depends = coreutils
+Exec = /usr/lib/anser/prepare-plymouth

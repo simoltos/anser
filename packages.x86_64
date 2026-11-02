@@ -31,6 +31,7 @@ grub
 mkinitcpio
 ntfs-3g
 os-prober
+plymouth
 
 # Terminal tools and documentation
 7zip
