@@ -46,8 +46,9 @@ tree
 wl-clipboard
 
 # Project tools
+gcc
 git
-npm
+make
 python-pillow
 rsync
 shellcheck
