@@ -44,6 +44,7 @@ man-pages
 ripgrep
 tree
 wl-clipboard
+xdg-terminal-exec
 
 # Project tools
 gcc
@@ -66,7 +67,8 @@ gnome-backgrounds
 gnome-calculator
 gnome-calendar
 gnome-clocks
-gnome-console
+ghostty
+ghostty-nautilus
 gnome-contacts
 gnome-disk-utility
 gnome-keyring
