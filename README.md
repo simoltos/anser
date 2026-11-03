@@ -25,6 +25,11 @@ maintained for Anser:
 [pacman.conf](pacman.conf) defines the repositories and signature policy,
 including Arch's `core`, `extra` and `multilib` repositories.
 
+On single-OS installations the boot menu is normally hidden. Press Esc or hold
+Shift during startup to show it. The menu remains visible when another OS is
+detected or the preceding boot was not marked successful. A graphical user
+session lasting two minutes marks the boot successful.
+
 The binary repositories are hosted in GitHub releases:
 
 - [anser](https://github.com/simoltos/anser/releases/tag/anser-x86_64) is the

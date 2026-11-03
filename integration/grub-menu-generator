@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Installed-system policy, emitted after the ordinary GRUB menu entries.
+set -euo pipefail
+
+# GRUB generators run as separate processes, so 30_os-prober cannot share its
+# discovery result with this hook. Probe again at config generation, never boot.
+# A failed/unavailable probe leaves the menu visible rather than assuming one OS.
+single_os=0
+if [[ ${GRUB_DISABLE_OS_PROBER:-false} != true ]] && command -v os-prober >/dev/null; then
+    if other_os=$(os-prober 2>/dev/null) && [[ -z $other_os ]]; then
+        single_os=1
+    fi
+fi
+fallback_timeout=${GRUB_TIMEOUT:-5}
+[[ $fallback_timeout =~ ^[1-9][0-9]*$ ]] || fallback_timeout=5
+
+cat <<'GRUB'
+set anser_previous_boot_ok=0
+if [ "${boot_success}" = "1" ]; then
+    set anser_previous_boot_ok=1
+fi
+set boot_success=0
+if save_env boot_success; then
+    true
+else
+    set anser_previous_boot_ok=0
+fi
+if [ "${menu_show_once}" = "1" ]; then
+    set menu_show_once=
+    save_env menu_show_once
+    set timeout_style=menu
+    set timeout=60
+elif [ "${menu_auto_hide}" = "1" ]; then
+GRUB
+# shellcheck disable=SC2016 # Expanded by GRUB, not this config generator.
+printf '    if [ "${anser_previous_boot_ok}" = "1" -a "%s" = "1" ]; then\n' "$single_os"
+cat <<'GRUB'
+        set timeout_style=hidden
+        set timeout=1
+    else
+        set timeout_style=menu
+GRUB
+printf '        set timeout=%s\n' "$fallback_timeout"
+printf '    fi\nfi\n'

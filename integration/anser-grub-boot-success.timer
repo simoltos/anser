@@ -1,0 +1,10 @@
+[Unit]
+Description=Wait for a successful Anser graphical session
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30s
+Unit=anser-grub-boot-success.service
+
+[Install]
+WantedBy=graphical.target

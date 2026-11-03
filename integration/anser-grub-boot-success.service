@@ -1,0 +1,8 @@
+[Unit]
+Description=Mark a successful Anser graphical boot
+After=display-manager.service
+ConditionPathExists=/boot/grub/grubenv
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/anser/grub-boot-success.py

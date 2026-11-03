@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Cenere invokes this only inside the installed target, before grub-mkconfig.
+set -euo pipefail
+install -d -m0755 /boot/grub
+if [[ ! -e /boot/grub/grubenv ]]; then
+    grub-editenv /boot/grub/grubenv create
+fi
+# A new installation may hide its first menu; GRUB clears success before boot.
+grub-editenv /boot/grub/grubenv set menu_auto_hide=1 boot_success=1
+systemctl enable anser-grub-boot-success.timer
