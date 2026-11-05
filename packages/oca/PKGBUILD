@@ -2,18 +2,18 @@
 # Anser packaging for https://github.com/simoltos/oca.
 # shellcheck disable=SC2034,SC2154
 pkgname=oca
-pkgver=0.r2.g649251562fba
+pkgver=0.r8.g10d80cb20eb0
 pkgrel=1
 pkgdesc='Independent terminal agent'
 arch=('x86_64')
 url='https://github.com/simoltos/oca'
 license=('MIT')
-_commit=649251562fba65168947c943d5e6e106b93da621
+_commit=10d80cb20eb06f7c1b7415e63748d2654dffb4fb
 depends=('glibc' 'bash' 'curl' 'cjson' 'openssl')
 optdepends=('xdg-utils: open the browser for provider login'
             'firefox>=140: browser tools for web search and page visits')
 source=("$pkgname-$_commit.tar.gz::https://codeload.github.com/simoltos/oca/tar.gz/$_commit")
-sha256sums=('4e0c152d0704f7a35b005a886b4b29703fbc625a5463e4185211b2c2bb239405')
+sha256sums=('2d0ceda21d4884678a7c460f1d1ac4734619993f8a51f3a0e7b7094677f6f3fe')
 
 prepare() {
     printf '{\n  "package": "%s",\n  "version": "%s",\n  "git_revision": "%s",\n  "working_tree_modified": false,\n  "source_archive_sha256": "%s",\n  "source_project": "%s"\n}\n' \
