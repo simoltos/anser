@@ -48,12 +48,18 @@ wl-clipboard
 xdg-terminal-exec
 
 # Project tools
+cmake
 gcc
+gdb
 git
 make
+ninja
+pkgconf
 python-pillow
 rsync
 shellcheck
+strace
+uv
 
 # Virtual machines
 qemu-desktop
