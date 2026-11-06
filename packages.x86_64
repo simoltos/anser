@@ -94,5 +94,6 @@ gst-libav
 networkmanager
 pipewire-alsa
 pipewire-pulse
+vlc-plugin-dvb
 vlc-plugin-ffmpeg
 wireplumber
