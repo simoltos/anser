@@ -1,0 +1,15 @@
+#!/usr/bin/bash
+set -euo pipefail
+user=live
+export OMARCHY_PATH=/usr/share/omarchy OMARCHY_MIRROR=stable
+export SYSTEMD_OFFLINE=1 SYSTEMD_IN_CHROOT=1
+export PATH="$OMARCHY_PATH/bin:/usr/bin"
+id "$user" >/dev/null 2>&1 || useradd --create-home --user-group --groups wheel --shell /bin/bash "$user"
+passwd -d "$user" >/dev/null
+pacman-key --init
+pacman-key --populate archlinux omarchy
+install -Dm640 "$OMARCHY_PATH/default/snapper/root" /etc/snapper/configs/root
+omarchy-apply-system --install-user "$user" --first-install
+(cd "/home/$user" && runuser -u "$user" -- env HOME="/home/$user" omarchy-provision-user --first-install)
+systemctl disable sddm.service
+systemctl mask snapper-cleanup.timer limine-snapper-sync.service
