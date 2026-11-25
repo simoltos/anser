@@ -1,0 +1,1602 @@
+#!/bin/bash
+
+# On the live ISO, .automated_script.sh exports OMARCHY_PATH and the package
+# targets before running us. The defaults keep bin/omarchy-iso-configurator
+# dry runs working outside the ISO.
+OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+OMARCHY_RUNTIME_PACKAGE="${OMARCHY_RUNTIME_PACKAGE:-omarchy}"
+OMARCHY_SETTINGS_PACKAGE="${OMARCHY_SETTINGS_PACKAGE:-omarchy-settings}"
+
+LOGO_PATH="$OMARCHY_PATH/logo.txt"
+
+# The setup form — keyboard, timezone, account, and hostname questions, plus the
+# rules their answers are checked against — shared verbatim with the first-boot
+# owner setup that finishes a deferred install. build-iso.sh vendors it out of
+# the runtime package this ISO bundles, so the two can never offer different
+# layouts or accept different usernames. On the ISO that vendored copy is what
+# loads; a dry run outside the ISO falls back to the omarchy checkout
+# bin/omarchy-iso-configurator already points OMARCHY_PATH at.
+SETUP_FORM="${SETUP_FORM:-/usr/share/omarchy-iso/setup-form.sh}"
+[[ -r $SETUP_FORM ]] || SETUP_FORM="$OMARCHY_PATH/install/provisioning/setup-form.sh"
+if [[ ! -r $SETUP_FORM ]]; then
+  echo "ERROR: shared setup form not found at $SETUP_FORM" >&2
+  exit 1
+fi
+source "$SETUP_FORM"
+OMARCHY_HOSTNAME_DEFAULT=anser
+
+# Partition creation helpers, shared with test/partition-numbering-test.sh so
+# the numbering logic can be exercised without a real disk.
+DISK_PARTITIONING="${DISK_PARTITIONING:-/usr/share/omarchy-iso/disk-partitioning.sh}"
+[[ -r $DISK_PARTITIONING ]] ||
+  DISK_PARTITIONING="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../usr/share/omarchy-iso/disk-partitioning.sh"
+if [[ ! -r $DISK_PARTITIONING ]]; then
+  echo "ERROR: disk partitioning helpers not found at $DISK_PARTITIONING" >&2
+  exit 1
+fi
+source "$DISK_PARTITIONING"
+
+# Installer strings in the language picked on the first screen; t <key> [args].
+INSTALLER_I18N="${INSTALLER_I18N:-/usr/share/omarchy-iso/i18n.sh}"
+[[ -r $INSTALLER_I18N ]] ||
+  INSTALLER_I18N="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../usr/share/omarchy-iso/i18n.sh"
+if [[ ! -r $INSTALLER_I18N ]]; then
+  echo "ERROR: installer strings not found at $INSTALLER_I18N" >&2
+  exit 1
+fi
+source "$INSTALLER_I18N"
+i18n_load en
+
+# Each block in the wordmark occupies one column, even on a VT with LANG=C.
+LOGO_WIDTH=$(LC_ALL=C.UTF-8 awk '{ if (length > max) max = length } END { print max+0 }' "$LOGO_PATH")
+
+export GUM_CONFIRM_PROMPT_FOREGROUND="6"
+export GUM_CONFIRM_SELECTED_FOREGROUND="0"
+export GUM_CONFIRM_SELECTED_BACKGROUND="2"
+export GUM_CONFIRM_UNSELECTED_FOREGROUND="7"
+export GUM_CONFIRM_UNSELECTED_BACKGROUND="0"
+
+# The console can grow after boot (the framebuffer settles late, especially in
+# VMs), so remeasure at every redraw rather than trusting startup geometry.
+# gum draws on /dev/tty, so measure that rather than inherited COLUMNS.
+measure_terminal() {
+  TERM_WIDTH=$(stty size 2>/dev/null </dev/tty | awk '{print $2}')
+  (( TERM_WIDTH > 0 )) || TERM_WIDTH=${COLUMNS:-80}
+
+  PADDING_LEFT=$(((TERM_WIDTH - LOGO_WIDTH) / 2))
+  (( PADDING_LEFT < 0 )) && PADDING_LEFT=0
+  PADDING_LEFT_SPACES=$(printf "%*s" "$PADDING_LEFT" "")
+
+  PADDING="0 0 0 $PADDING_LEFT"
+  export GUM_CHOOSE_PADDING="$PADDING"
+  export GUM_FILTER_PADDING="$PADDING"
+  export GUM_INPUT_PADDING="$PADDING"
+  export GUM_SPIN_PADDING="$PADDING"
+  export GUM_TABLE_PADDING="$PADDING"
+  export GUM_CONFIRM_PADDING="$PADDING"
+}
+measure_terminal
+
+# Give the boot VT a moment to settle before drawing the welcome screen.
+# The greeter also redraws if KMS changes its geometry later.
+wait_for_stable_terminal() {
+  local width last="" stable=0 waited=0
+  while (( waited < 5000 )); do
+    width=$(stty size 2>/dev/null </dev/tty | awk '{print $2}')
+    [[ $width =~ ^[0-9]+$ ]] || width=0
+    if [[ $width == "$last" ]] && (( width >= LOGO_WIDTH )); then
+      (( ++stable >= 3 )) && break
+    else
+      stable=0
+    fi
+    last=$width
+    sleep 0.2
+    (( waited += 200 ))
+  done
+}
+
+clear_logo() {
+  measure_terminal
+  printf "\033[H\033[2J"
+  gum style --foreground 2 --padding "1 0 0 $PADDING_LEFT" "$(<"$LOGO_PATH")"
+}
+
+draw_welcome_buttons() {
+  local row=$1 choice=$2
+  local install='   Install   ' live='   Try live   '
+  local column=$(((TERM_WIDTH - ${#install} - ${#live} - 2) / 2 + 1))
+  (( column > 0 )) || column=1
+
+  # Match the installer’s gum confirm buttons in the console palette.
+  local selected=$'\033[30;42m' unselected=$'\033[37;40m'
+  local install_style=$selected live_style=$unselected
+  if (( choice == 2 )); then
+    install_style=$unselected
+    live_style=$selected
+  fi
+  printf '\033[%d;%dH%s%s\033[0m  %s%s\033[0m' \
+    "$row" "$column" "$install_style" "$install" "$live_style" "$live"
+}
+
+draw_welcome() {
+  local rows=${1% *} choice=$2 preview=$3
+  local logo_h content_h top cols logo_row tagline_row action_row tagline tpad
+  measure_terminal
+  cols=$TERM_WIDTH
+  [[ $rows =~ ^[0-9]+$ ]] || rows=${LINES:-24}
+  logo_h=$(wc -l <"$LOGO_PATH")
+
+  # Logo, tagline and action row with an extra blank row before the buttons.
+  content_h=$((logo_h + 4 + preview))
+  top=$(((rows - content_h) / 2))
+  (( top < 0 )) && top=0
+  logo_row=$((top + 1))
+  tagline_row=$((top + logo_h + 2))
+  action_row=$((top + content_h))
+
+  printf '\033[?25l\033[H\033[2J'
+
+  printf '\033[%d;1H' "$logo_row"
+  gum style --foreground 2 --padding "0 0 0 $PADDING_LEFT" "$(<"$LOGO_PATH")"
+
+  tagline="Anser Linux"
+  tpad=$(((cols - ${#tagline}) / 2)); (( tpad < 0 )) && tpad=0
+  printf '\033[%d;%dH%s' "$tagline_row" "$((tpad + 1))" "$tagline"
+
+  if (( preview )); then
+    draw_welcome_buttons "$action_row" "$choice"
+  else
+    local hint="Press Return to Start Install"
+    local hpad=$(((cols - ${#hint}) / 2))
+    (( hpad >= 0 )) || hpad=0
+    printf '\033[%d;%dH\033[2m%s\033[0m' "$action_row" "$((hpad + 1))" "$hint"
+  fi
+
+  # ColorShift the logo: a green base (indexed color 2) with a cyan accent (6)
+  # drifting through, settling on green. Indexed ANSI colors, not hex — the
+  # framebuffer console can't render truecolor faithfully (it crushes the
+  # palette to a muddy lavender), but the 16 indexed colors map to the Tokyo
+  # Night palette and render true. --xterm-colors is what keeps them indexed:
+  # ttfx resolves even indexed stops to truecolor otherwise, which would put the
+  # settle color out of step with the `gum style --foreground 2` logo underneath.
+  # One long-running invocation (many cycles) so it never restarts — a restart is
+  # what flashed. The effect reads from /dev/null so it never swallows the
+  # Return; --reuse-canvas paints upward from the saved cursor, anchored one row
+  # below the logo.
+  printf '\033[%d;1H\0337' "$((logo_row + logo_h))"
+  # Run ttfx directly (not inside a `while` subshell) so $anim is ttfx's own
+  # PID: killing a wrapping subshell would orphan ttfx, which then keeps
+  # painting the logo over the keyboard step. --cycles is high enough that it
+  # never ends on its own before Return.
+  # Two columns narrower than the console: ttfx centers its text two columns
+  # right of plain centering, so a full-width canvas would sit the animated
+  # logo a column off the gum-drawn one underneath it.
+  ttfx -i "$LOGO_PATH" \
+    --canvas-width "$((cols > 2 ? cols - 2 : cols))" \
+    --anchor-text c \
+    --frame-rate 60 \
+    --reuse-canvas \
+    --xterm-colors \
+    colorshift \
+    --gradient-stops 2 10 6 10 \
+    --gradient-frames 3 \
+    --cycles 1000 \
+    --final-gradient-stops 2 \
+    </dev/null >/dev/tty 2>/dev/null &
+}
+
+greeter() {
+  local choice=0 preview=0 size anim key status
+  [[ ! -f /etc/anser/live-desktop ]] || preview=1
+  while true; do
+    size=$(stty size </dev/tty)
+    draw_welcome "$size" "$choice" "$preview"
+    anim=$!
+
+    # As in omarchy-iso, remeasure while waiting for Return: the framebuffer
+    # can take over after the initial draw. Keep the selected action on redraw.
+    while true; do
+      status=0
+      IFS= read -rsn1 -t 0.5 key </dev/tty || status=$?
+      (( status > 128 )) || break
+      [[ $(stty size </dev/tty) == "$size" ]] || break
+    done
+    kill "$anim" 2>/dev/null
+    wait "$anim" 2>/dev/null || true
+    stty sane </dev/tty 2>/dev/null || true
+    (( status > 128 )) && continue
+    (( status == 0 )) || return 1
+    [[ -n $key && $key != $'\r' ]] || break
+    (( preview )) || continue
+    if [[ $key == $'\e' ]]; then
+      IFS= read -rsn2 -t 0.3 key </dev/tty || continue
+      [[ -n $key && $key != $'\r' ]] || break
+    fi
+    case $key in
+      '[C'|'OC'|'[B'|'OB'|j) choice=2 ;;
+      '[D'|'OD'|'[A'|'OA'|k) choice=0 ;;
+      $'\t'|'[Z') choice=$((2 - choice)) ;;
+    esac
+  done
+  # Reset the screen so the leftover animation frame doesn't linger under the
+  # keyboard step that follows.
+  printf '\033[0m\033[H\033[2J\033[?25h'
+  return "$choice"
+}
+
+abort() {
+  gum style --padding "0 0 0 ${PADDING_LEFT:-0}" "${1:-$(t abort.default)}"
+  echo
+  gum style --padding "0 0 0 ${PADDING_LEFT:-0}" "$(t abort.retry /root/installer)"
+  exit 1
+}
+
+step() {
+  clear_logo
+  echo
+  gum style --padding "0 0 0 $PADDING_LEFT" "$1"
+  echo
+}
+
+# Padded body text to line up with the logo and gum widgets.
+say() {
+  gum style --padding "0 0 0 $PADDING_LEFT" "$@"
+}
+
+notice() {
+  clear_logo
+  echo
+  gum spin --spinner "pulse" --title "$1" -- sleep "${2:-2}"
+  echo
+}
+
+# STEP 0: LANGUAGE
+#
+# Every Omarchy language is offered. One with a catalog here also switches the
+# installer; the rest, in scripts the console font cannot draw, are listed by
+# their English name and only set the installed system's language.
+
+LANGUAGES_JSON="${LANGUAGES_JSON:-$OMARCHY_PATH/default/i18n/locales.json}"
+language="en"
+
+# The setup form takes its language and defaults from the language picked here:
+# the layout that goes with it, and its country's capital for when the network
+# cannot guess a timezone. A language with no single country (English, Arabic,
+# Swahili, Tamil) falls back to UTC: with no fallback the form opens a search,
+# where Enter takes the first zone, Africa/Abidjan.
+LANGUAGE_DEFAULTS="${LANGUAGE_DEFAULTS:-$OMARCHY_ISO_SHARE/language-defaults.json}"
+
+language_default() {
+  jq -r --arg code "$language" --arg field "$1" '.[$code][$field] // empty' "$LANGUAGE_DEFAULTS" 2>/dev/null
+}
+
+set_form_language() {
+  OMARCHY_FORM_LANGUAGE=$language
+  OMARCHY_FORM_KEYBOARD_DEFAULT=$(language_default keyboard)
+  OMARCHY_FORM_KEYBOARD_DEFAULT=${OMARCHY_FORM_KEYBOARD_DEFAULT:-English (US)}
+  OMARCHY_FORM_TIMEZONE_FALLBACK=$(language_default timezone)
+  OMARCHY_FORM_TIMEZONE_FALLBACK=${OMARCHY_FORM_TIMEZONE_FALLBACK:-UTC}
+  export OMARCHY_FORM_TIMEZONE_DEFAULT="$OMARCHY_FORM_TIMEZONE_FALLBACK"
+  export OMARCHY_FORM_LANGUAGE OMARCHY_FORM_KEYBOARD_DEFAULT OMARCHY_FORM_TIMEZONE_FALLBACK
+}
+
+language_label() {
+  local field=englishName
+  i18n_translated "$1" && field=name
+  jq -r --arg code "$1" --arg field "$field" '.[$code][$field] // $code' "$LANGUAGES_JSON" 2>/dev/null || printf '%s' "$1"
+}
+
+# "label<TAB>code" rows, English first and the rest alphabetical by what is shown.
+language_rows() {
+  local translated
+  translated=$(cd "$OMARCHY_ISO_I18N_DIR" && printf '%s\n' *.json | sed 's/\.json$//' | jq -R . | jq -sc .)
+  jq -r --argjson translated "$translated" '
+    to_entries
+    | map({code: .key, label: (if (.key | IN($translated[])) then .value.name else .value.englishName end)})
+    | sort_by(.code != "en", (.label | sub("^Í"; "I") | sub("^Č"; "C") | ascii_downcase))
+    | .[] | "\(.label)\t\(.code)"
+  ' "$LANGUAGES_JSON"
+}
+
+# The first screen, so it carries the intro and the hidden Ctrl+C entry into
+# deferred provisioning; before a language is picked they read in English.
+# Callers re-check defer_provisioning after this returns.
+language_form() {
+  local choice status
+
+  if [[ -r $LANGUAGES_JSON ]]; then
+    while true; do
+      clear_logo
+      echo
+      say "$(t keyboard.intro)"
+      say --foreground 8 "$(t keyboard.anotherOwner)"
+      echo
+      choice=$(language_rows | gum choose --height 10 --label-delimiter $'\t' \
+        --selected "$(language_label "$language")" --header "$(t language.header)") && status=0 || status=$?
+      ((status == 0)) && [[ -n $choice ]] && break
+
+      if ((status == OMARCHY_FORM_SIGNAL)) && confirm_prepare_for_another_owner; then
+        defer_provisioning=true
+        return 0
+      fi
+      # Esc, or a declined Ctrl+C: nothing precedes the first screen, so ask again.
+    done
+    language=$choice
+  fi
+
+  i18n_load "$language"
+  set_form_language
+}
+
+# STEP 1: KEYBOARD LAYOUT
+
+keyboard_form() {
+  local status
+
+  while true; do
+    clear_logo
+    echo
+    if ! i18n_translated "$language"; then
+      # English on purpose: there is no catalog for this language to say it in.
+      say --foreground 8 "The installer stays in English. Anser will be in $(language_label "$language") once installed."
+    fi
+    echo
+
+    omarchy_prompt_keyboard && status=0 || status=$?
+    ((status == 0)) && break
+
+    # Esc means "back", to the language picker, which can arm deferred provisioning.
+    if ((status == OMARCHY_FORM_BACK)); then
+      language_form
+      $defer_provisioning && return 0
+      continue
+    fi
+
+    ((status == OMARCHY_FORM_SIGNAL)) && continue
+    abort
+  done
+
+  # Only attempt to load keyboard layout if we're on a real console
+  # loadkeys only works on Linux virtual consoles (tty), not in terminal emulators
+  if [[ $(tty 2>/dev/null) == "/dev/tty"* ]]; then
+    loadkeys "$keyboard" 2>/dev/null
+  fi
+}
+
+# Ctrl+C on the first screen offers to prepare the machine for another owner.
+# Confirm it before committing, so an accidental Ctrl+C doesn't silently switch
+# the whole install.
+confirm_prepare_for_another_owner() {
+  clear_logo
+  echo
+  say "$(t owner.title)"
+  say --foreground 8 "$(t owner.detail)"
+  echo
+  gum confirm --affirmative "$(t owner.yes)" --negative "$(t owner.no)" "$(t owner.prompt)"
+}
+
+# The user step. Deferred-provisioning installs skip it entirely — the machine's first owner
+# picks their keyboard and creates their user in the first-boot setup, so the
+# operator sets nothing user-specific.
+
+user_form() {
+  step "$(t user.intro)"
+
+  # Each prompt reports 0 (set), OMARCHY_FORM_BACK (Esc), or OMARCHY_FORM_SIGNAL
+  # (Ctrl+C). Both non-zero cases unwind to user_step, which decides what they
+  # mean here; the form itself never aborts.
+  omarchy_prompt_timezone || return $?
+  omarchy_prompt_username || return $?
+  omarchy_prompt_password || return $?
+
+  # Hash the password with SHA-512 crypt ($6$), which is what openssl passwd offers
+  password_hash=$(printf '%s' "$password" | openssl passwd -6 -stdin)
+
+  omarchy_prompt_hostname || return $?
+}
+
+# Returns 0 on confirmed account details, or as soon as the keyboard screen
+# arms deferred provisioning.
+user_step() {
+  local status
+
+  while true; do
+    user_form && status=0 || status=$?
+    if ((status != 0)); then
+      # Esc unwinds to the start of the form. Ctrl+C has no side channel in the
+      # user step (only the keyboard and disk screens give it a meaning), so it
+      # keeps its long-standing behaviour of ending the install.
+      ((status == OMARCHY_FORM_BACK)) || abort
+      keyboard_form
+      $defer_provisioning && return 0
+      continue
+    fi
+
+    # Add manual padding since gum table -p doesn't respect padding
+    echo -e "$(t summary.field),$(t summary.value)
+$(t summary.language),$(language_label "$language")
+$(t summary.keyboard),$keyboard
+$(t summary.timezone),$timezone
+$(t summary.username),$username
+$(t summary.password),$(printf "%${#password}s" | tr ' ' '*')
+$(t summary.hostname),$hostname" |
+      gum table -s "," -p | sed "s/^/${PADDING_LEFT_SPACES}/"
+
+    echo
+    if gum confirm --affirmative "$(t common.yes)" --negative "$(t common.change)" "$(t summary.prompt)"; then
+      break
+    else
+      keyboard_form
+      $defer_provisioning && return 0
+    fi
+  done
+}
+
+# STEP 3: DISK
+
+get_disk_info() {
+  local device="$1"
+  local size vendor model label
+
+  # Get basic disk information
+  size=$(lsblk -dno SIZE "$device" 2>/dev/null)
+  vendor=$(lsblk -dno VENDOR "$device" 2>/dev/null | sed 's/ *$//')
+  model=$(lsblk -dno MODEL "$device" 2>/dev/null | sed 's/ *$//')
+
+  # Combine vendor and model, avoiding duplication
+  label=""
+  if [[ -n $vendor && -n $model ]]; then
+    if [[ $model == *$vendor* ]]; then
+      label="$model"
+    else
+      label="$vendor $model"
+    fi
+  elif [[ -n $model ]]; then
+    label="$model"
+  elif [[ -n $vendor ]]; then
+    label="$vendor"
+  fi
+
+  # Format display string
+  local display="$device"
+  [[ -n $size ]] && display="$display ($size)"
+  [[ -n $label ]] && display="$display - $label"
+
+  # Append compact partition summary
+  local part_summary
+  part_summary=$(lsblk -nro TYPE,NAME,FSTYPE,MOUNTPOINT "$device" 2>/dev/null | \
+    awk '$1=="part" { printf "%s%s%s", s, ($3==""?"unknown":$3), ($4==""?"":"("$4")"); s=", " }')
+  [[ -n $part_summary ]] && display+=" [$part_summary]"
+
+  echo "$display"
+}
+
+get_root_disk() {
+  local device="$1"
+  local parent
+
+  [[ -n $device ]] || return 1
+
+  # /run/archiso/bootmnt usually resolves to the boot partition, but the
+  # installer picker works with whole disks. Walk back to the parent disk so
+  # the install media itself never shows up as a wipe target.
+  device=$(readlink -f "$device" 2>/dev/null || printf "%s\n" "$device")
+
+  while true; do
+    parent=$(lsblk -dno PKNAME "$device" 2>/dev/null | tail -n1)
+    [[ -n $parent ]] || break
+    device="/dev/$parent"
+  done
+
+  if [[ $(lsblk -dno TYPE "$device" 2>/dev/null) == "disk" ]]; then
+    printf "%s\n" "$device"
+  fi
+}
+
+# partition_path lives in disk-partitioning.sh alongside the creation helpers.
+
+# BitLocker writes the "-FVE-FS-" signature at offset 3 of the partition.
+detect_bitlocker() {
+  local p sig
+  for p in $(lsblk -lnpo NAME,TYPE "$disk" | awk '$2=="part"{print $1}'); do
+    sig=$(dd if="$p" bs=1 skip=3 count=8 status=none 2>/dev/null)
+    if [[ "$sig" == "-FVE-FS-" ]]; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Save vendor-signed Qualcomm firmware before a full-disk install removes Windows.
+# Missing firmware does not abort installation.
+stage_qualcomm_firmware() {
+  command -v qcom-firmware-extract >/dev/null 2>&1 || return 0
+  [[ -d /sys/firmware/devicetree/base ]] || return 0
+
+  local stage=/run/omarchy/firmware
+  local missing saved
+  missing=$(qcom-firmware-extract --list-missing 2>/dev/null | grep -c . || true)
+  ((missing > 0)) || return 0
+
+  step "$(t firmware.title)"
+  qcom-firmware-extract --stage "$stage" >/run/omarchy/firmware-stage.log 2>&1 || true
+  saved=$(grep -c . "$stage/manifest" 2>/dev/null || true)
+  if ((saved >= missing)); then
+    say "$(t firmware.saved "$saved")"
+  elif ((saved > 0)); then
+    say "$(t firmware.partial "$saved" "$missing")"
+  else
+    say --foreground 1 "$(t firmware.none)"
+    if grep -q BitLocker /run/omarchy/firmware-stage.log 2>/dev/null; then
+      say "$(t firmware.bitlocker)"
+      say "$(t firmware.bitlockerHint)"
+    fi
+    say "$(t firmware.degraded)"
+    say "$(t firmware.extract "\`sudo qcom-firmware-extract\`")"
+  fi
+  echo
+}
+
+# Look for an existing Windows ESP (FAT partition containing EFI/Microsoft) on $disk.
+detect_windows_esp() {
+  local p tmp_mp
+  for p in $(blkid -t TYPE=vfat -o device 2>/dev/null); do
+    [[ "$p" == "$disk"* ]] || continue
+    tmp_mp=$(mktemp -d)
+    if mount -t vfat -o ro "$p" "$tmp_mp" 2>/dev/null; then
+      if [[ -d "$tmp_mp/EFI/Microsoft" ]]; then
+        umount "$tmp_mp" 2>>"${OMARCHY_INSTALL_LOG_FILE:-/dev/null}"
+        rmdir "$tmp_mp" 2>>"${OMARCHY_INSTALL_LOG_FILE:-/dev/null}"
+        echo "$p"
+        return 0
+      fi
+      umount "$tmp_mp" 2>>"${OMARCHY_INSTALL_LOG_FILE:-/dev/null}"
+    fi
+    rmdir "$tmp_mp" 2>/dev/null || true
+  done
+  return 1
+}
+
+to_gb() {
+  awk -v bytes="$1" 'BEGIN {printf "%.1fGB", bytes/1024/1024/1024}'
+}
+
+# The ISO build records its architecture and, on aarch64, the kernel the image
+# boots and installs (see build-iso.sh). One aarch64 image serves every board.
+iso_arch=$(cat /root/omarchy_arch 2>/dev/null || uname -m)
+if [[ $iso_arch == aarch64 && ! -s /root/omarchy_kernel ]]; then
+  echo "Error: this aarch64 ISO does not record the kernel it was built with" >&2
+  exit 1
+fi
+
+# T2 Macs need their own kernel for keyboard/wifi drivers. aarch64 images are
+# built for one platform kernel (linux-omarchy today), recorded by the
+# build, and nothing else boots.
+iso_kernel=$(cat /root/omarchy_kernel 2>/dev/null || true)
+detect_kernel() {
+  if [[ $iso_arch == aarch64 ]]; then
+    echo "$iso_kernel"
+  elif lspci -nn 2>/dev/null | grep -q "106b:180[12]"; then
+    echo "linux-t2"
+  else
+    echo "linux-omarchy"
+  fi
+}
+
+# Limine's UEFI binary and the package mirrors follow the architecture. The
+# mirror lines are pasted into the JSON heredocs below, which do not reprocess
+# a variable's value: $repo/$arch stay literal here without backslashes.
+if [[ $iso_arch == aarch64 ]]; then
+  limine_efi_binary="limine_aa64.efi"
+  archinstall_custom_servers='            {"url": "file:///var/cache/omarchy/mirror/offline"}'
+else
+  limine_efi_binary="limine_x64.efi"
+  archinstall_custom_servers='            {"url": "file:///var/cache/omarchy/mirror/offline"}'
+fi
+
+# wait_for_device lives in disk-partitioning.sh: it now reports failure, and
+# every caller here aborts on it.
+
+# disk_step and create_partition fail through this rather than abort() so a
+# half-built layout is undone before the user is handed back their disk.
+disk_abort_hook() {
+  # Release the target before reclaiming its partitions: a mounted filesystem
+  # or an open LUKS mapping would keep parted from removing them.
+  umount -R /mnt 2>/dev/null || true
+  umount /mnt/btrfs-root 2>/dev/null || true
+  rmdir /mnt/btrfs-root 2>/dev/null || true
+  cryptsetup close omarchy_root 2>/dev/null || true
+  rollback_created_parts "$disk"
+  abort "$1"
+}
+
+# Save the configurator answers the installer consumes: encryption choice as a
+# plain file, account details as archinstall credentials. The git identity is
+# asked for after first login rather than here.
+# Deferred-provisioning installs defer the user to first boot: no credentials, and on encrypted
+# targets the orchestrator generates a throwaway LUKS passphrase itself.
+write_user_files() (
+  umask 077
+  if [[ -f user_credentials.json ]]; then
+    chmod 0600 user_credentials.json || return 1
+  fi
+  printf '%s\n' "$encrypt_installation" >user_encrypt_installation.txt
+
+  if $defer_provisioning; then
+    cat <<-_EOF_ >user_credentials.json
+{
+    "users": []
+}
+_EOF_
+    return
+  fi
+
+  local password_hash_escaped username_escaped
+  password_hash_escaped=$(echo -n "$password_hash" | jq -Rsa)
+  username_escaped=$(echo -n "$username" | jq -Rsa)
+
+  local credentials_encryption_line=""
+  if [[ $encrypt_installation == true ]]; then
+    local disk_password=$password
+    if [[ $install_target == "preserve_home" ]]; then
+      # The old LUKS passphrase can differ from the new login password.
+      disk_password=${preserve_passphrase:-}
+      [[ ${1:-} != "dry" ]] || disk_password=""
+    fi
+    if [[ -n $disk_password ]]; then
+      credentials_encryption_line="    \"encryption_password\": $(printf '%s' "$disk_password" | jq -Rsa),"
+    fi
+  fi
+
+  cat <<-_EOF_ >user_credentials.json
+{
+$credentials_encryption_line
+    "root_enc_password": $password_hash_escaped,
+    "users": [
+        {
+            "enc_password": $password_hash_escaped,
+            "groups": [],
+            "sudo": true,
+            "username": $username_escaped
+        }
+    ]
+}
+_EOF_
+)
+
+# Show what a dry run would have written, then leave no trace behind.
+print_dry_run_files() {
+  echo -e "User Configuration:"
+  cat user_configuration.json
+
+  echo -e "\n\nUser Credentials:"
+  cat user_credentials.json
+
+  echo -e "\n\nDisk Encryption:"
+  cat user_encrypt_installation.txt
+
+  rm -f user_configuration.json user_credentials.json user_encrypt_installation.txt
+}
+
+# Shared error screen for every "can't fit Omarchy here" outcome of the
+# partition install. Offers the partition tool as the meaningful second
+# action so users have a way to actually fix the situation.
+not_enough_space() {
+  local available="${1:-0}"
+  step "$(t space.title "$disk")"
+  say --foreground 1 "$(t space.detail "$disk" "$(to_gb $available)")"
+  say "$(t space.hint "$disk")"
+  echo
+  if ! gum confirm --affirmative "$(t common.back)" --negative "$(t space.openTool)" "$(t space.prompt)"; then
+    open_partition_tool
+  fi
+  return 1
+}
+
+# Decide half of the free-space install: checks, free-space analysis, and the
+# encryption confirm. Sets the globals run_partition_execute needs. Returns 1
+# to fall back to the install-mode picker.
+run_partition_decide() {
+  step "$(t bitlocker.checking "$disk")"
+  local bl_part
+  bl_part=$(detect_bitlocker || true)
+  if [[ -n "$bl_part" ]]; then
+    say --foreground 1 "$(t bitlocker.found "$bl_part")"
+    say "$(t bitlocker.hint)"
+    say "$(t bitlocker.suspend)"
+    echo
+    # Back to the mode picker rather than out of the installer: the free-space
+    # install is the default on a disk with partitions, so Enter lands here.
+    gum confirm --affirmative "$(t common.back)" --negative "$(t bitlocker.quit)" "$(t space.prompt)" ||
+      abort "$(t bitlocker.abort)"
+    return 1
+  fi
+
+  # Omarchy always creates its own dedicated ESP in free space and never
+  # adopts an existing (Windows) ESP. Sharing the Windows ESP is fragile:
+  # Windows Update/repair can reclaim or reformat it, the typical 100-260MiB
+  # Windows ESP is far too small for our Unified Kernel Images, and a shared
+  # ESP forces the install unencrypted. A separate Linux ESP keeps Windows
+  # and Omarchy fully isolated and keeps LUKS on the table.
+  step "$(t esp.checking "$disk")"
+  local detected_win_esp
+  detected_win_esp=$(detect_windows_esp || true)
+  if [[ -n "$detected_win_esp" ]]; then
+    say "$(t esp.found "$detected_win_esp")"
+    say "$(t esp.own)"
+  else
+    say "$(t esp.new)"
+  fi
+
+  step "$(t space.analyzing "$disk")"
+  partprobe "$disk" 2>/dev/null || true
+  sleep 1
+
+  # An unlabeled disk has no partition table for parted to scan, so we
+  # synthesize a whole-disk free region and mklabel gpt before mkpart.
+  local FREE_SPACE_INFO pt_type disk_size_b
+  needs_mklabel=false
+  pt_type=$(partition_table_type "$disk")
+  if [[ -z "$pt_type" ]]; then
+    disk_size_b=$(lsblk -bdno SIZE "$disk" 2>/dev/null)
+    if [[ -n "$disk_size_b" && "$disk_size_b" -gt 0 ]]; then
+      local _mib=$((1024 * 1024))
+      local _start=$_mib
+      local _end=$(( (disk_size_b - _mib) / _mib * _mib ))
+      FREE_SPACE_INFO="$_start $_end $((_end - _start))"
+      needs_mklabel=true
+    fi
+  else
+    # -s (script mode) keeps parted from prompting on stderr for warnings
+    # like a stale GPT backup; without it the configurator hangs invisibly.
+    FREE_SPACE_INFO=$(parted -ms "$disk" unit B print free </dev/null 2>/dev/null | \
+      awk -F: '
+        $NF ~ /free/ {
+          start=$2; end=$3; size=$4;
+          gsub(/B/, "", start);
+          gsub(/B/, "", end);
+          gsub(/B/, "", size);
+          if (size+0 > max_size+0) {
+            max_size=size; max_start=start; max_end=end;
+          }
+        }
+        END {
+          if (max_size+0 > 0) printf "%s %s %s\n", max_start, max_end, max_size;
+        }')
+  fi
+
+  if [[ -z "$FREE_SPACE_INFO" ]]; then
+    not_enough_space 0
+    return $?
+  fi
+
+  local FREE_START_B FREE_END_B FREE_SIZE_B
+  read -r FREE_START_B FREE_END_B FREE_SIZE_B <<<"$FREE_SPACE_INFO"
+
+  local mib=$((1024 * 1024)) gib=$((1024 * 1024 * 1024))
+  local ALIGN=$mib
+  local EFI_SIZE_B=$((2 * gib))
+  local MIN_INSTALL_B=$((32 * gib))    # Minimum total Omarchy allocation
+
+  EFI_START_B=$(( (FREE_START_B + ALIGN - 1) / ALIGN * ALIGN ))
+  EFI_END_B=$((EFI_START_B + EFI_SIZE_B))
+  ROOT_START_B=$(( (EFI_END_B + 1 + ALIGN - 1) / ALIGN * ALIGN ))
+  ROOT_END_B=$((FREE_END_B / ALIGN * ALIGN))
+
+  if (( ROOT_END_B <= ROOT_START_B )); then
+    not_enough_space "$FREE_SIZE_B"
+    return $?
+  fi
+
+  local INSTALL_MAX_B=$((ROOT_END_B - EFI_START_B))
+
+  if (( INSTALL_MAX_B < MIN_INSTALL_B )); then
+    not_enough_space "$INSTALL_MAX_B"
+    return $?
+  fi
+
+  # Default to encrypted and hide the unencrypted path behind Ctrl+C,
+  # matching the full-disk flow. The dedicated Omarchy ESP always supports
+  # LUKS, so encryption is always on the table here.
+  local mode="encrypted" affirmative confirm_status
+
+  while true; do
+    clear_logo
+    echo
+    say "$(t freeSpace.title "$(to_gb $INSTALL_MAX_B)")"
+
+    case $mode in
+      encrypted)
+        say --foreground 8 "$(t encryption.hint)"
+        affirmative="$(t install.yes)"
+        ;;
+      unencrypted)
+        affirmative="$(t install.yesUnencrypted)"
+        ;;
+    esac
+    echo
+
+    gum confirm --affirmative "$affirmative" --negative "$(t common.change)" "$(t freeSpace.prompt "$disk")"
+    confirm_status=$?
+
+    case $confirm_status in
+      0)
+        [[ $mode == "encrypted" ]] && encrypt_installation=true || encrypt_installation=false
+        break
+        ;;
+      1)
+        return 1
+        ;;
+      130)
+        case $mode in
+          encrypted) mode="unencrypted" ;;
+          unencrypted) mode="encrypted" ;;
+        esac
+        ;;
+      *)
+        abort
+        ;;
+    esac
+  done
+
+  if [[ "$encrypt_installation" == "true" ]]; then
+    esp_mount_in_target=/boot
+  else
+    esp_mount_in_target=/efi
+  fi
+
+  kernel_choice=$(detect_kernel)
+
+  # Partition numbers are not knowable until parted assigns them (it fills the
+  # lowest free GPT slot, and freeing space by deleting a partition leaves one
+  # below the highest). run_partition_execute reads them back after creation;
+  # a dry run has nothing to read.
+  efi_part_num=""
+  root_part_num=""
+  efi_dev="<assigned at creation>"
+  root_partition_device="<assigned at creation>"
+  root_mapper="<assigned at creation>"
+  if [[ "$encrypt_installation" == "true" ]]; then
+    root_mapper="/dev/mapper/omarchy_root"
+  fi
+}
+
+# Execute half of the free-space install: partition, format, mount, and write
+# the pre-mounted (protected) install configuration. Runs after the user step
+# so LUKS can be formatted with the user's password.
+run_partition_execute() {
+  local dry=false subvol
+  [[ "${1:-}" == "dry" ]] && dry=true
+
+  if $dry; then
+    $needs_mklabel && say "[dry] would initialize GPT on $disk"
+    say "[dry] would create an EFI partition and a root partition in the free region"
+    say "[dry] partition numbers are assigned by parted at creation, then read back"
+    say "[dry] encrypted=$encrypt_installation kernel=$kernel_choice"
+  else
+    step "$(t partitions.creating "$disk")"
+    if $needs_mklabel; then
+      disk_step "initializing GPT on $disk" parted --script "$disk" mklabel gpt
+      partprobe "$disk" 2>/dev/null || true
+      sleep 1
+    fi
+
+    # create_partition reports the number parted actually used; nothing here
+    # may assume it. It sets created_partition_number rather than printing so
+    # the rollback bookkeeping survives (a $(...) would subshell it away).
+    create_partition "$disk" "$EFI_START_B" "$EFI_END_B" fat32 OMARCHY_EFI ||
+      disk_abort_hook "Could not create the EFI partition on $disk"
+    efi_part_num="$created_partition_number"
+
+    create_partition "$disk" "$ROOT_START_B" "$ROOT_END_B" btrfs OMARCHY_ROOT ||
+      disk_abort_hook "Could not create the root partition on $disk"
+    root_part_num="$created_partition_number"
+
+    disk_step "flagging partition $efi_part_num as ESP" \
+      parted --script "$disk" set "$efi_part_num" esp on
+
+    efi_dev=$(partition_path "$disk" "$efi_part_num")
+    root_partition_device=$(partition_path "$disk" "$root_part_num")
+
+    # Its warnings go to stderr, which reaches the tty unpadded; keep them in
+    # the log.
+    partprobe "$disk" 2>>"${OMARCHY_INSTALL_LOG_FILE:-/dev/null}"
+    sync
+    sleep 2
+
+    wait_for_device "$efi_dev" || disk_abort_hook "EFI partition $efi_dev never appeared"
+    wait_for_device "$root_partition_device" ||
+      disk_abort_hook "Root partition $root_partition_device never appeared"
+
+    # Both partitions are ours and brand new, but the space they occupy may
+    # carry signatures from whatever was deleted to free it.
+    disk_step "clearing stale signatures on $efi_dev" wipefs -af "$efi_dev"
+    disk_step "clearing stale signatures on $root_partition_device" wipefs -af "$root_partition_device"
+
+    if [[ "$encrypt_installation" == "true" ]]; then
+      step "$(t partitions.luks "$root_partition_device")"
+      # Through disk_step like the rest of the layout, so what cryptsetup and
+      # the calibration print lands in the install log, not unpadded on the
+      # screen. The passphrase comes from printf, a builtin, through a pipe:
+      # never an argv the process table can show, and no trailing newline,
+      # which cryptsetup would read as part of the key.
+      # The same persistent open flags as orchestrator/luks_tuning.py: the
+      # free-space path formats and opens here, before the orchestrator runs,
+      # so that tuning does not reach it.
+      disk_step "Formatting LUKS2 on $root_partition_device" \
+        omarchy-luks-calibrate format "$root_partition_device" < <(printf "%s" "$password")
+      disk_step "Opening the encrypted root on $root_partition_device" \
+        cryptsetup open --persistent --allow-discards --perf-no_read_workqueue \
+          "$root_partition_device" omarchy_root - < <(printf "%s" "$password")
+      root_mapper="/dev/mapper/omarchy_root"
+    else
+      root_mapper="$root_partition_device"
+    fi
+
+    step "$(t partitions.btrfs)"
+    # -K: no whole-device TRIM first. mkfs.btrfs discards the entire
+    # partition by default, which through dm-crypt takes seconds on a 1 TB
+    # SSD (and much longer on a DRAM-less one), before the install timer even
+    # starts. The root image is written over this filesystem anyway, and the
+    # installed system's fstrim.timer discards free space on its own; the
+    # full-disk path does the same through archinstall (archinstall_adapter).
+    disk_step "creating the Btrfs filesystem on $root_mapper" \
+      mkfs.btrfs -K -f -L OMARCHY "$root_mapper"
+    wait_for_device "$root_mapper" || disk_abort_hook "Root device $root_mapper never appeared"
+
+    mkdir -p /mnt/btrfs-root
+    disk_step "mounting $root_mapper" mount "$root_mapper" /mnt/btrfs-root
+    for subvol in @ @home @log @pkg; do
+      disk_step "creating subvolume $subvol" btrfs subvolume create "/mnt/btrfs-root/$subvol"
+    done
+    umount /mnt/btrfs-root 2>>"${OMARCHY_INSTALL_LOG_FILE:-/dev/null}"
+    rmdir /mnt/btrfs-root 2>>"${OMARCHY_INSTALL_LOG_FILE:-/dev/null}"
+
+    disk_step "mounting the target root" \
+      mount -o noatime,compress=zstd,subvol=@ "$root_mapper" /mnt
+    mkdir -p /mnt/home /mnt/var/log /mnt/var/cache/pacman/pkg /mnt"$esp_mount_in_target"
+    disk_step "mounting /home" \
+      mount -o noatime,compress=zstd,subvol=@home "$root_mapper" /mnt/home
+    disk_step "mounting /var/log" \
+      mount -o noatime,compress=zstd,subvol=@log "$root_mapper" /mnt/var/log
+    disk_step "mounting the package cache" \
+      mount -o noatime,compress=zstd,subvol=@pkg "$root_mapper" /mnt/var/cache/pacman/pkg
+
+    disk_step "creating the ESP filesystem on $efi_dev" mkfs.fat -F32 -n OMARCHY_EFI "$efi_dev"
+    # Typed, not probed: an unrecognised probe walks /proc/filesystems, and on
+    # the live ISO squashfs answers first.
+    disk_step "mounting the ESP" mount -t vfat "$efi_dev" /mnt"$esp_mount_in_target"
+
+    # The orchestrator's first act is to verify this handoff. Check it here so
+    # a failure names the step that broke rather than surfacing later as
+    # "protected mode: /mnt is not a mountpoint".
+    mountpoint -q /mnt ||
+      disk_abort_hook "Target /mnt is not mounted; not starting the installer"
+    mountpoint -q "/mnt$esp_mount_in_target" ||
+      disk_abort_hook "ESP is not mounted at /mnt$esp_mount_in_target"
+  fi
+
+  local luks_uuid_json="null" luks_uuid
+  if [[ "$encrypt_installation" == "true" ]]; then
+    if $dry; then
+      luks_uuid="00000000-0000-0000-0000-000000000000"
+    else
+      luks_uuid=$(blkid -s UUID -o value "$root_partition_device")
+    fi
+    luks_uuid_json="\"$luks_uuid\""
+  fi
+
+  # enable_fallback writes the loader to EFI/BOOT/BOOTX64.EFI as well as
+  # EFI/limine. That path is only ever claimed on the Omarchy ESP, which
+  # run_partition_execute just created, wipefs'd and mkfs.fat'd in free
+  # space; the Windows ESP is never mounted here. Firmware that drops or
+  # ignores the "Limine" NVRAM entry (some AMI/MSI boards) still finds the
+  # install through the removable-media path, which is the only route left
+  # when a boot variable does not survive.
+  local storage
+  storage=$(cat <<-_EOF_
+{
+    "esp_device": "$efi_dev",
+    "root_device": "$root_partition_device",
+    "root_mapper": "$root_mapper",
+    "luks_uuid": $luks_uuid_json,
+    "kernel": "$kernel_choice"
+}
+_EOF_
+)
+  write_pre_mounted_configuration protected "$storage"
+}
+
+write_pre_mounted_configuration() {
+  local mode=$1 storage=$2 plan_line=""
+  if [[ $mode == "preserve_home" ]]; then
+    plan_line="\"preserve_home\": $preserve_plan,"
+  fi
+
+  cat <<-_EOF_ >user_configuration.json
+{
+    "app_config": null,
+    "archinstall-language": "English",
+    "auth_config": {},
+    "audio_config": { "audio": "pipewire" },
+    "bootloader_config": { "bootloader": "Limine", "uki": false, "removable": false },
+    "custom_commands": [],
+    "omarchy_install": {
+        "input_method": "${keyboard_input_method:-none}",
+        "input_xkb_layout": "${keyboard_xkb_layout:-}",
+        "language": "$language",
+        "mode": "$mode",
+        $plan_line
+        "target_mount": "/mnt",
+        "boot": {
+            "esp_mount": "$esp_mount_in_target",
+            "esp_path": "/EFI/limine",
+            "efi_binary": "$limine_efi_binary",
+            "enable_fallback": true
+        },
+        "storage": $storage
+    },
+    "disk_config": {
+        "config_type": "pre_mounted_config",
+        "mountpoint": "/mnt"
+    },
+    "hostname": "$hostname",
+    "kernels": [ "$kernel_choice" ],
+    "network_config": { "type": "iso" },
+    "ntp": true,
+    "parallel_downloads": 8,
+    "script": null,
+    "services": [],
+    "swap": true,
+    "timezone": "$timezone",
+    "locale_config": {
+        "kb_layout": "$keyboard",
+        "sys_enc": "UTF-8",
+        "sys_lang": "en_US.UTF-8"
+    },
+    "mirror_config": {
+        "custom_repositories": [],
+        "custom_servers": [
+$archinstall_custom_servers
+        ],
+        "mirror_regions": {},
+        "optional_repositories": []
+    },
+    "packages": [
+        "base-devel",
+        "git",
+        "omarchy-keyring",
+        "$OMARCHY_SETTINGS_PACKAGE",
+        "$OMARCHY_RUNTIME_PACKAGE"
+    ],
+    "profile_config": {
+        "gfx_driver": null,
+        "greeter": null,
+        "profile": {}
+    },
+    "version": "3.0.9"
+}
+_EOF_
+}
+
+disk_form() {
+  step "$(t disk.intro)"
+
+  # Don't offer the install media as an option (Arch ISO mounts it here)
+  local boot_source
+  local exclude_disk
+  boot_source=$(findmnt -no SOURCE /run/archiso/bootmnt 2>/dev/null || true)
+  exclude_disk=$(get_root_disk "$boot_source")
+
+  # Installable disks, internal ones first, without the boot device
+  local available_disks
+  available_disks=$(install_disk_candidates "$exclude_disk")
+
+  # Get available disks and format them with info
+  local disk_options=""
+  while IFS= read -r device; do
+    if [[ -n "$device" ]]; then
+      disk_info=$(get_disk_info "$device")
+      disk_options="$disk_options$disk_info"$'\n'
+    fi
+  done <<<"$available_disks"
+
+  # Esc asks again: the account screens before this one are confirmed and
+  # left behind. Ctrl+C still ends the install.
+  local status
+  while true; do
+    selected_display=$(echo "$disk_options" | gum choose --header "$(t disk.header)") && break || status=$?
+    ((status == OMARCHY_FORM_BACK)) || abort
+  done
+  disk=$(echo "$selected_display" | awk '{print $1}')
+}
+
+# STEP 4: INSTALL MODE
+
+open_partition_tool() {
+  step "$(t tool.title "$disk")"
+  say "$(t tool.hint)"
+  say --foreground 8 "$(t tool.warning)"
+  say --foreground 8 "$(t tool.tip)"
+  echo
+  gum confirm --affirmative "$(t tool.open)" --negative "$(t common.back)" "$(t tool.prompt "$disk")" || return 0
+
+  clear
+  cfdisk "$disk" || true
+  partprobe "$disk" 2>/dev/null || true
+  sync
+  sleep 1
+}
+
+# If the disk has no partition table or no unallocated free space, the only
+# viable paths write the whole disk, so the free-space mode is not offered.
+requires_full_disk_install() {
+  local pt_type free_space_b
+  pt_type=$(partition_table_type "$disk")
+
+  # a) No partition table: disk is empty
+  [[ -z "$pt_type" ]] && return 0
+
+  # b) No usable free space
+  free_space_b=$(parted -ms "$disk" unit B print free </dev/null 2>/dev/null | \
+    awk -F: '
+      $NF ~ /free/ {
+        size=$4;
+        gsub(/B/, "", size);
+        if (size+0 > max+0) max=size;
+      }
+      END {
+        print max+0;
+      }')
+  [[ -z "$free_space_b" || "$free_space_b" -eq 0 ]]
+}
+
+# Returns gum's status: OMARCHY_FORM_BACK for Esc, OMARCHY_FORM_SIGNAL for
+# Ctrl+C.
+install_mode_form() {
+  local free_space_offered=false choice choices=()
+
+  # The free-space/protected path registers an EFI boot entry and is UEFI-only.
+  # Full-disk installs still support BIOS through the orchestrator's BIOS branch.
+  if [[ -d /sys/firmware/efi ]] && ! $full_disk_only; then
+    free_space_offered=true
+  fi
+  local -A labels=([full_disk]="$(t mode.fullDisk)" [free_space]="$(t mode.freeSpace)"
+    [preserve_home]="$(t mode.preserveHome)" [other_disk]="$(t mode.otherDisk)")
+  while read -r choice; do
+    choices+=("${labels[$choice]}"$'\t'"$choice")
+  done < <(install_mode_choices "$free_space_offered" "$preserve_offered")
+
+  step "$(t mode.intro)"
+  install_mode=$(gum choose --label-delimiter $'\t' --header "$(t mode.header "$disk")" "${choices[@]}")
+}
+
+preserve_home_helper() {
+  local share
+  share=$(dirname -- "$DISK_PARTITIONING")
+  PYTHONPATH="$share" python -m orchestrator.preserve_home "$@"
+}
+
+run_preserve_home_decide() {
+  local selected partition fstype passphrase="" plan checked_user=$username status
+  if (( ${#home_candidates[@]} == 1 )); then
+    selected=${home_candidates[0]}
+  else
+    step "$(t preserve.partition)"
+    selected=$(gum choose "${home_candidates[@]}") || return 1
+  fi
+  IFS=$'\t' read -r partition fstype <<<"$selected"
+
+  if [[ $fstype == "crypto_LUKS" ]]; then
+    step "$(t preserve.unlock "$partition")"
+    passphrase=$(gum input --password --placeholder "" --prompt "$(t preserve.passphrase)") || return 1
+  fi
+
+  while true; do
+    step "$(t preserve.checking "$partition")"
+    if plan=$(printf '%s' "$passphrase" | preserve_home_helper probe "$disk" "$partition" "$checked_user" 2>&1); then
+      break
+    else
+      status=$?
+    fi
+    if (( status == 3 )); then
+      say "$(t preserve.owner "$checked_user")"
+      checked_user=$(omarchy_prompt_username >&2 && printf '%s' "$username") || return 1
+      continue
+    fi
+    say --foreground 1 "$plan"
+    say "$(t preserve.back)"
+    IFS= read -r </dev/tty
+    return 1
+  done
+
+  step "$(t mode.preserveHome)"
+  if jq -e '.interrupted' >/dev/null <<<"$plan"; then
+    say "$(t preserve.interrupted)"
+  fi
+  say "$(t preserve.detail "$partition" "/home/$checked_user")"
+  echo
+  gum confirm --default=false --affirmative "$(t preserve.reinstall)" --negative "$(t common.back)" \
+    "$(t preserve.confirm)" || return 1
+
+  preserve_plan=$plan
+  username=$checked_user
+  preserve_passphrase=$passphrase
+  esp_mount_in_target=$(jq -r '.esp_mount' <<<"$plan")
+  encrypt_installation=$(jq -r '.luks_uuid != null' <<<"$plan")
+  kernel_choice=$(detect_kernel)
+}
+
+confirm_disk_overwrite() {
+  local mode="encrypted"
+  local affirmative confirm_status
+
+  while true; do
+    clear_logo
+    echo
+    say "$(t overwrite.warning)"
+
+    if [[ $mode == "encrypted" ]]; then
+      say --foreground 8 "$(t encryption.hint)"
+      affirmative="$(t install.yes)"
+    else
+      affirmative="$(t install.yesUnencrypted)"
+    fi
+
+    echo
+    gum confirm --affirmative "$affirmative" --negative "$(t common.change)" "$(t overwrite.prompt "$disk")"
+    confirm_status=$?
+
+    case $confirm_status in
+      0)
+        [[ $mode == "encrypted" ]] && encrypt_installation=true || encrypt_installation=false
+        return 0
+        ;;
+      1)
+        return 1
+        ;;
+      130)
+        [[ $mode == "encrypted" ]] && mode="unencrypted" || mode="encrypted"
+        ;;
+      *)
+        abort
+        ;;
+    esac
+  done
+}
+
+# Choose the install mode before writing to the target disk. Deferred
+# provisioning skips this step and goes straight to full-disk confirmation.
+select_installation() {
+  local full_disk_only preserve_offered status candidate_rows home_candidates=()
+
+  while true; do
+    if requires_full_disk_install; then
+      full_disk_only=true
+    else
+      full_disk_only=false
+    fi
+
+    if ! candidate_rows=$(preserve_home_helper candidates "$disk" 2>&1); then
+      step "$(t preserve.scanFailed "$disk")"
+      say --foreground 1 "$candidate_rows"
+      say "$(t preserve.back)"
+      IFS= read -r </dev/tty
+      disk_form
+      continue
+    fi
+    preserve_offered=false
+    if [[ -n $candidate_rows ]]; then
+      mapfile -t home_candidates <<<"$candidate_rows"
+      preserve_offered=true
+    fi
+
+    # A full disk can still hold a compatible installation.
+    if $full_disk_only && ! $preserve_offered; then
+      install_mode="full_disk"
+    else
+      # Esc goes back to the disk list, as "Choose a different disk" does. Ctrl+C
+      # still ends the install.
+      install_mode_form && status=0 || status=$?
+      if ((status != 0)); then
+        ((status == OMARCHY_FORM_BACK)) || abort
+        install_mode="other_disk"
+      fi
+    fi
+
+    case "$install_mode" in
+      full_disk)
+        if confirm_disk_overwrite; then
+          install_target="full_disk"
+          return 0
+        fi
+        # When the picker was skipped, declining the overwrite means the user
+        # wants a different disk.
+        if $full_disk_only && ! $preserve_offered; then disk_form; fi
+        ;;
+      free_space)
+        if run_partition_decide; then
+          install_target="free_space"
+          return 0
+        fi
+        ;;
+      preserve_home)
+        if run_preserve_home_decide; then
+          install_target="preserve_home"
+          return 0
+        fi
+        ;;
+      other_disk)
+        disk_form
+        ;;
+    esac
+  done
+}
+
+# STEP 1: KEYBOARD (Ctrl+C here arms deferred provisioning and jumps to disk selection)
+
+defer_provisioning=false
+install_target="full_disk"
+
+# Let the live VT reach its settled width before the first screen so the logo
+# isn't measured against the transient 80-column boot console.
+wait_for_stable_terminal
+i18n_console_font "$(tty 2>/dev/null)"
+
+while true; do
+  if greeter; then
+    break
+  else
+    greeter_status=$?
+  fi
+  (( greeter_status == 2 )) || continue
+  if ! /usr/local/bin/anser-try-live; then
+    printf '%s\n' "The live desktop could not be started. Press Return to go back."
+    IFS= read -r _ </dev/tty || true
+  fi
+done
+
+language_form
+
+$defer_provisioning || keyboard_form
+
+# Normal install: keyboard (loaded above, so the LUKS passphrase is typed under
+# the right layout) → user → disk → install mode. The user step can unwind to
+# the language screen and arm deferral there, hence the second check.
+if ! $defer_provisioning; then
+  user_step
+fi
+
+if $defer_provisioning; then
+  # Deferred provisioning: no user setup, and the keyboard is deferred to the machine's first
+  # boot. A defined default keymap so it boots before then; the owner picks
+  # their real layout in the OOBE, which re-keys the console and, on encrypted
+  # installs, rebuilds the initramfs so the LUKS prompt matches.
+  keyboard="us"
+  keyboard_input_method="none"
+  keyboard_xkb_layout=""
+  username=""
+  password=""
+  password_hash=""
+  # Neutral defaults for the install; the owner overwrites both in the
+  # first-boot OOBE (omarchy-provision-owner).
+  hostname=$OMARCHY_HOSTNAME_DEFAULT
+  timezone="UTC"
+
+  # Jump straight to disk selection + overwrite confirmation (encrypted by
+  # default, Ctrl+C toggles unencrypted). deferred provisioning is always a full-disk install.
+  disk_form
+  stage_qualcomm_firmware
+  until confirm_disk_overwrite; do
+    disk_form
+  done
+  install_target="full_disk"
+else
+  disk_form
+  stage_qualcomm_firmware
+  select_installation
+fi
+
+clear
+
+write_user_files "$@" || abort
+unset preserve_passphrase
+
+if [[ $install_target == "preserve_home" ]]; then
+  write_pre_mounted_configuration preserve_home '{}' || abort
+  if [[ ${1:-} == "dry" ]]; then
+    print_dry_run_files
+  fi
+  exit 0
+fi
+
+if [[ $install_target == "free_space" ]]; then
+  # Refuse a corrupt or missing install medium before we partition or format
+  # anything. The full-disk path clears this in the orchestrator before
+  # archinstall formats; the free-space path formats here, in the configurator,
+  # so it runs the same gate first. omarchy-wait-root-image-verify collects the
+  # boot-time hasher's verdict, waiting for it if it is still running. (2>&1
+  # 1>/dev/null captures stderr, where the failure message is, and drops the
+  # boot-medium/scheduler line on stdout — the orchestrator logs that later.
+  # OMARCHY_VERIFY_PROGRESS routes a live percent line straight to the
+  # terminal while the hash is still running, so a wait on a slow medium
+  # shows movement instead of a frozen step header.)
+  if [[ ${1:-} != "dry" ]]; then
+    step "Verifying the install medium"
+    if ! verify_error=$(OMARCHY_VERIFY_PROGRESS=/dev/tty OMARCHY_VERIFY_PROGRESS_INDENT="$PADDING_LEFT" \
+      omarchy-wait-root-image-verify 2>&1 1>/dev/null); then
+      abort "$(head -1 <<<"$verify_error")"
+    fi
+  fi
+
+  run_partition_execute "$@"
+
+  if [[ ${1:-} == "dry" ]]; then
+    print_dry_run_files
+  fi
+  exit 0
+fi
+
+# Setup partition layout
+disk_size=$(lsblk -bdno SIZE "$disk")
+mib=$((1024 * 1024))
+gib=$((mib * 1024))
+disk_size_in_mib=$((disk_size / mib * mib)) # Rounds to nearest MiB
+
+gpt_backup_reserve=$((mib))
+boot_partition_start=$((mib))
+boot_partition_size=$((2 * gib))
+
+main_partition_start=$((boot_partition_size + boot_partition_start))
+main_partition_size=$((disk_size_in_mib - main_partition_start - gpt_backup_reserve))
+
+kernel_choice=$(detect_kernel)
+
+if [[ $encrypt_installation == true ]]; then
+  # Deferred-provisioning installs carry no password: the orchestrator generates a throwaway
+  # LUKS passphrase and stages it for the first-boot re-key.
+  if $defer_provisioning; then
+    encryption_password_line=""
+  else
+    encryption_password_line=",
+            \"encryption_password\": $(echo -n "$password" | jq -Rsa)"
+  fi
+  disk_encryption_config=$(cat <<-_EOF_
+,
+        "disk_encryption": {
+            "encryption_type": "luks",
+            "lvm_volumes": [],
+            "iter_time": 2000,
+            "partitions": [ "8c2c2b92-1070-455d-b76a-56263bab24aa" ]$encryption_password_line
+        }
+_EOF_
+)
+else
+  disk_encryption_config=""
+fi
+
+cat <<-_EOF_ >user_configuration.json
+{
+    "app_config": null,
+    "archinstall-language": "English",
+    "auth_config": {},
+    "audio_config": { "audio": "pipewire" },
+    "bootloader_config": { "bootloader": "Limine", "uki": false, "removable": false },
+    "custom_commands": [],
+    "omarchy_install": {
+        "input_method": "${keyboard_input_method:-none}",
+        "input_xkb_layout": "${keyboard_xkb_layout:-}",
+        "language": "$language",
+        "mode": "full_disk",
+        "defer_provisioning": $defer_provisioning,
+        "target_mount": "/mnt",
+        "boot": {
+            "esp_mount": "/boot",
+            "esp_path": "/EFI/limine",
+            "efi_binary": "$limine_efi_binary",
+            "enable_fallback": true
+        },
+        "storage": {
+            "kernel": "$kernel_choice"
+        }
+    },
+    "disk_config": {
+        "config_type": "default_layout",
+        "device_modifications": [
+            {
+                "device": "$disk",
+                "partitions": [
+                    {
+                        "btrfs": [],
+                        "dev_path": null,
+                        "flags": [ "boot", "esp" ],
+                        "fs_type": "fat32",
+                        "mount_options": [],
+                        "mountpoint": "/boot",
+                        "obj_id": "ea21d3f2-82bb-49cc-ab5d-6f81ae94e18d",
+                        "size": {
+                            "sector_size": { "unit": "B", "value": 512 },
+                            "unit": "B",
+                            "value": $boot_partition_size
+                        },
+                        "start": {
+                            "sector_size": { "unit": "B", "value": 512 },
+                            "unit": "B",
+                            "value": $boot_partition_start
+                        },
+                        "status": "create",
+                        "type": "primary"
+                    },
+                    {
+                        "btrfs": [
+                            { "mountpoint": "/", "name": "@" },
+                            { "mountpoint": "/home", "name": "@home" },
+                            { "mountpoint": "/var/log", "name": "@log" },
+                            { "mountpoint": "/var/cache/pacman/pkg", "name": "@pkg" }
+                        ],
+                        "dev_path": null,
+                        "flags": [],
+                        "fs_type": "btrfs",
+                        "mount_options": [ "compress=zstd" ],
+                        "mountpoint": null,
+                        "obj_id": "8c2c2b92-1070-455d-b76a-56263bab24aa",
+                        "size": {
+                            "sector_size": { "unit": "B", "value": 512 },
+                            "unit": "B",
+                            "value": $main_partition_size
+                        },
+                        "start": {
+                            "sector_size": { "unit": "B", "value": 512 },
+                            "unit": "B",
+                            "value": $main_partition_start
+                        },
+                        "status": "create",
+                        "type": "primary"
+                    }
+                ],
+                "wipe": true
+            }
+        ]$disk_encryption_config
+    },
+    "hostname": "$hostname",
+    "kernels": [ "$kernel_choice" ],
+    "network_config": { "type": "iso" },
+    "ntp": true,
+    "parallel_downloads": 8,
+    "script": null,
+    "services": [],
+    "swap": true,
+    "timezone": "$timezone",
+    "locale_config": {
+        "kb_layout": "$keyboard",
+        "sys_enc": "UTF-8",
+        "sys_lang": "en_US.UTF-8"
+    },
+    "mirror_config": {
+        "custom_repositories": [],
+        "custom_servers": [
+$archinstall_custom_servers
+        ],
+        "mirror_regions": {},
+        "optional_repositories": []
+    },
+    "packages": [
+        "base-devel",
+        "git",
+        "omarchy-keyring",
+        "$OMARCHY_SETTINGS_PACKAGE",
+        "$OMARCHY_RUNTIME_PACKAGE"
+    ],
+    "profile_config": {
+        "gfx_driver": null,
+        "greeter": null,
+        "profile": {}
+    },
+    "version": "3.0.9"
+}
+_EOF_
+
+if [[ $1 == "dry" ]]; then
+  print_dry_run_files
+fi

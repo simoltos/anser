@@ -1,0 +1,25 @@
+#!/usr/bin/ash
+
+run_hook() {
+    mount_handler=anser_mount_handler
+}
+
+# Complete the live root before late hooks such as Plymouth switch into it.
+anser_mount_handler() {
+    local medium base cow loop
+    archiso_mount_handler "$1"
+    medium="/run/archiso/bootmnt/${archisobasedir:-arch}/$(uname -m)"
+    base=/run/anser-base
+    cow="/run/archiso/cowspace/${cow_directory}"
+    mkdir -p "$base/container" "$base/system" &&
+        mount -t squashfs -o ro,loop "$medium/anser-system.sfs" "$base/container" &&
+        loop=$(losetup --find --show --read-only "$base/container/omarchy-root.img") &&
+        mount -t btrfs -o ro,rescue=nologreplay,subvol=omarchy-root "$loop" "$base/system" &&
+        umount "$1" &&
+        mount -t overlay airootfs -o "lowerdir=/run/archiso/airootfs:$base/system,upperdir=$cow/upperdir,workdir=$cow/workdir" "$1" &&
+        return 0
+    run_hookfunctions run_emergencyhook 'emergency hook' $EMERGENCYHOOKS
+    err "Cannot mount the Anser installation system."
+    launch_interactive_shell
+    reboot -f
+}

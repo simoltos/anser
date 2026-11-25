@@ -1,0 +1,9 @@
+arch-install-scripts
+archinstall
+cryptsetup
+gum
+lvm2
+parted
+rsync
+terminus-font
+ttfx

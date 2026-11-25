@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Remove only API mount trees owned by this build; their source mounts remain.
+set -euo pipefail
+recursive=false
+for target in "$@"; do
+    case $target in
+        "/project/$ANSER_BUILD_STATE"/work/build-*/archiso/"$ANSER_ARCH"/airootfs/dev|"/project/$ANSER_BUILD_STATE"/work/build-*/archiso/"$ANSER_ARCH"/airootfs/proc|"/project/$ANSER_BUILD_STATE"/work/build-*/archiso/"$ANSER_ARCH"/airootfs/sys)
+            recursive=true ;;
+    esac
+done
+# A recursively bound /proc has masked child mounts from the enclosing
+# container. util-linux can report those children as not mounted and leave
+# the root attached. Detach these owned API trees as one operation; the
+# enclosing private mount namespace is discarded when the build finishes.
+if [[ $recursive == true ]]; then exec /usr/bin/umount --lazy "$@"; fi
+exec /usr/bin/umount "$@"

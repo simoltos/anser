@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+build() {
+  add_module btrfs
+  add_module loop
+  add_module squashfs
+  add_module overlay
+    # Plymouth supplies the theme. Use Anser's artwork only in the live initramfs.
+    if [[ -f /etc/initcpio/anser/logo.png ]]; then
+        add_file /etc/initcpio/anser/logo.png /usr/share/plymouth/themes/omarchy/logo.png
+        add_file /etc/initcpio/anser/plymouthd.conf /etc/plymouth/plymouthd.conf
+    fi
+  add_runscript
+}
+
+help() {
+  echo "Mount the shared Anser system beneath the live installer."
+}

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Run inside the ISO worker. Package only the project checkout, with the network off.
+set -euo pipefail
+shopt -s nullglob
+work=$1
+shift
+tools="$work/tools/archiso/$ANSER_ARCH/airootfs"
+mkdir -p "$tools" "$work/local"
+unshare --mount --propagation private -- /usr/bin/pacstrap -C "$work/tools.conf" -c -G -M \
+    "$tools" "$@"
+
+recipes=(/project/iso/builder/recipes/*/PKGBUILD)
+if (( ${#recipes[@]} == 0 )); then
+    printf 'No local package recipes found.\n' >&2
+    exit 1
+fi
+package_environment=()
+if [[ $ANSER_ARCH == aarch64 ]]; then
+    # Keep XZ and icon conversion lightweight under ARM CPU emulation.
+    package_environment=(--setenv XZ_OPT -1 --setenv MAGICK_THREAD_LIMIT 1 --setenv OMP_NUM_THREADS 1)
+fi
+for recipe in "${recipes[@]}"; do
+    dir="$work/recipes/$(basename "$(dirname "$recipe")")"
+    mkdir -p "$dir"
+    cp -a "$(dirname "$recipe")/." "$dir/"
+    install -m644 /project/LICENSE "$dir/LICENSE"
+    chown -R nobody:nobody "$dir"
+    bwrap --unshare-net --unshare-ipc --unshare-pid --die-with-parent --cap-add ALL \
+        --ro-bind "$tools" / --ro-bind /project/system /opt --bind "$dir" /mnt \
+        --dev /dev --proc /proc --tmpfs /tmp --chmod 1777 /tmp --clearenv \
+        --setenv PATH /usr/bin --setenv HOME /tmp --setenv LC_ALL C --setenv OMARCHY_SRC /opt --setenv ANSER_LICENSE /mnt/LICENSE \
+        "${package_environment[@]}" \
+        --chdir /mnt runuser -u nobody -- env HOME=/tmp makepkg --noconfirm --nodeps --nocheck --nosign
+    built=("$dir"/*.pkg.tar.*)
+    if (( ${#built[@]} == 0 )); then
+        printf 'No package archive built from %s.\n' "$recipe" >&2
+        exit 1
+    fi
+    mv -- "${built[@]}" "$work/local/"
+done
+archives=("$work/local/"*.pkg.tar.*)
+for archive in "${archives[@]}"; do
+    gpg --homedir /etc/pacman.d/gnupg --batch --detach-sign "$archive"
+done
+repo-add --include-sigs "$work/local/anser-build.db.tar.gz" "${archives[@]}"

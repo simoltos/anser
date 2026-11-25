@@ -1,0 +1,15 @@
+[Unit]
+Description=Verify the Anser installation medium
+After=local-fs.target
+Before=omarchy-luks-calibrate.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/run/archiso/bootmnt/arch/@ARCH@
+ExecStart=/usr/bin/sha256sum --check --strict --quiet SHA256SUMS
+ExecStart=/usr/bin/pacman-key --init
+ExecStart=/usr/bin/pacman-key --populate archlinux omarchy
+Nice=10
+TimeoutStartSec=90min
+[Install]
+WantedBy=multi-user.target

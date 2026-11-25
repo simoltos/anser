@@ -1,0 +1,89 @@
+#!/bin/bash
+set -euo pipefail
+if [[ -z ${ANSER_WORK:-} || $1 != "$ANSER_WORK/archiso/$ANSER_ARCH/airootfs" ]]; then
+    exec /usr/bin/mksquashfs "$@"
+fi
+root=$1
+output=$2
+media=${output%/*}
+work=$ANSER_WORK
+base=$media/anser-system.sfs
+builder=/project/iso/builder
+configs=/project/iso/configs
+
+# mkarchiso has exported the ISO kernel and initramfs. Prepare the clean target once.
+for path in etc/initcpio/{hooks,install}/{archiso,anser_base} etc/mkinitcpio.conf.d/archiso.conf etc/mkinitcpio.d/linux-omarchy.preset version; do
+    rm -f -- "$root/$path"
+done
+if [[ $ANSER_ARCH == x86_64 ]]; then
+    rm -rf -- "$root/etc/initcpio/anser"
+    rm -f -- "$root/etc/initcpio/hooks/udev"
+fi
+rm -rf -- "$root/etc/pacman.d/gnupg"
+: >"$root/etc/machine-id"
+mkdir -p "$root/var/lib/pacman/sync"
+repositories=/project/$ANSER_BUILD_STATE/repositories/current
+repo_names=(omarchy core extra multilib)
+if [[ $ANSER_ARCH == aarch64 ]]; then
+    repo_names=(omarchy core extra alarm)
+fi
+dbs=()
+for name in "${repo_names[@]}"; do dbs+=("$repositories/$name.db"); done
+cp -L -- "${dbs[@]}" "$root/var/lib/pacman/sync/"
+sed -i '/^IMAGE_\(ID\|VERSION\)=/d' "$root/usr/lib/os-release"
+"$builder/prepare-kernel" "$root"
+
+# Install live-only tools in a separate overlay. The installer and preview share the clean system.
+layer="$work/layer"
+merged="$layer/archiso/$ANSER_ARCH/airootfs"
+mkdir -p "$layer"/{upper,work} "$merged"
+mount -t overlay overlay -o "lowerdir=$root,upperdir=$layer/upper,workdir=$layer/work,userxattr" "$merged"
+trap 'umount "$merged"' EXIT
+mapfile -t live < "$work/installer-packages"
+unshare --mount --propagation private -- /usr/bin/pacstrap -C "$work/profile/pacman.conf" -c -G -M -- "$merged" --needed "${live[@]}"
+pacman --config /dev/null --root "$merged" -Q | sort > "$work/installed.live"
+cmp "$work/packages.live" "$work/installed.live"
+umount "$merged"
+trap - EXIT
+
+upper="$layer/upper"
+cp -a "$configs/airootfs/." "$upper/"
+install -Dm644 "$configs/pacman-offline.conf" "$upper/etc/pacman.conf"
+medium=/run/archiso/bootmnt/arch/$ANSER_ARCH
+ln -sfn "$medium/offline" "$upper/var/cache/omarchy/mirror/offline"
+sed -i "s/@ARCH@/$ANSER_ARCH/g" "$upper/etc/systemd/system/anser-medium-verify.service"
+if [[ $ANSER_ARCH == aarch64 ]]; then
+    printf '%s\n' linux-omarchy > "$upper/root/omarchy_kernel"
+    sed -i 's/--populate archlinux omarchy/--populate archlinuxarm omarchy/' \
+        "$upper/etc/systemd/system/anser-medium-verify.service"
+fi
+install -Dm400 /usr/share/archiso/configs/baseline/airootfs/etc/shadow "$upper/etc/shadow"
+share="$upper/usr/share/omarchy-iso"
+# The shared form reads its hostname hint from the runtime's CLI catalogs.
+for catalog in /project/system/default/i18n/*/cli.json; do
+    target="$upper/usr/share/omarchy/${catalog#/project/system/}"
+    mkdir -p "${target%/*}"
+    sed '/"setupForm.hostnamePlaceholder":/s/omarchy/anser/g' "$catalog" > "$target"
+done
+cp "$work/packages.target" "$share/packages.final"
+cp "$work/packages.live-only" "$share/"
+cp "$work/profile/packages.$ANSER_ARCH" "$share/packages.explicit"
+wc -l < "$work/packages.target" > "$share/expected-packages"
+cp /project/system/install/omarchy-{base,other}.packages "$share/"
+if [[ $ANSER_ARCH == aarch64 ]]; then
+    install -Dm644 /project/system/bin/omarchy-hw-platform "$share/omarchy-hw-platform"
+    cp "$work/profile/packages.$ANSER_ARCH" "$share/omarchy-base.packages"
+fi
+cp /project/system/install/provisioning/progress-icon.sh "$share/"
+# Only signed hardware-dependent archives are needed after deploying the system.
+mv "$work/offline" "$media/offline"
+mkdir -p "$upper/var/lib/pacman/sync"
+cp "$media/offline/offline.db" "$upper/var/lib/pacman/sync/offline.db"
+cc -O2 -Wall "$builder/omarchy-image-write.c" -o "$upper/usr/local/bin/omarchy-image-write" -lzstd
+/usr/bin/mksquashfs "$upper" "$output" -noappend -processors 2 -mem 256M -comp zstd -Xcompression-level 3 -no-progress -quiet
+"$builder/build-root-image.sh" "$root" "$work/container" "$base"
+
+(
+    cd "$media"
+    sha256sum airootfs.sfs anser-system.sfs offline/* >SHA256SUMS
+)

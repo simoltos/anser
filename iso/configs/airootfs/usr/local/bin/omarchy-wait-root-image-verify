@@ -1,0 +1,4 @@
+#!/bin/bash
+set -eu
+systemctl start anser-medium-verify.service
+systemctl is-active --quiet anser-medium-verify.service

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Local user-namespace adapter. Never place this in an Archiso profile.
+set -euo pipefail
+scoped_root() {
+    case $1 in
+        "/project/$ANSER_BUILD_STATE"/work/build-*/archiso/"$ANSER_ARCH"/airootfs) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+mount_type=''
+positional=()
+args=("$@")
+while (( $# )); do
+    case $1 in
+        -t|--types) mount_type=$2; shift 2 ;;
+        -o|--options|-O|--test-opts) shift 2 ;;
+        --) shift; positional+=("$@"); break ;;
+        -*) shift ;;
+        *) positional+=("$1"); shift ;;
+    esac
+done
+if (( ${#positional[@]} != 2 )); then exec /usr/bin/mount "${args[@]}"; fi
+target=${positional[1]}
+if [[ $target == */run && ( ${positional[0]} == /run || $mount_type == tmpfs ) ]] && scoped_root "${target%/run}"; then
+    /usr/bin/mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs "$target"
+    install -d -m0755 "$target/lock"
+    exit 0
+fi
+if [[ $mount_type == devtmpfs && $target == */dev ]] && scoped_root "${target%/dev}"; then
+    /usr/bin/mount -t tmpfs -o mode=0755,nosuid tmpfs "$target"
+    mkdir -p -- "$target/pts" "$target/shm"
+    chmod 1777 "$target/shm"
+    for device in null zero full random urandom tty; do
+        touch -- "$target/$device"
+        /usr/bin/mount --bind "/dev/$device" "$target/$device"
+    done
+    ln -s /proc/self/fd "$target/fd"
+    ln -s /proc/self/fd/0 "$target/stdin"
+    ln -s /proc/self/fd/1 "$target/stdout"
+    ln -s /proc/self/fd/2 "$target/stderr"
+    ln -s pts/ptmx "$target/ptmx"
+    exit 0
+fi
+if [[ $mount_type == devpts && $target == */dev/pts ]] && scoped_root "${target%/dev/pts}"; then
+    if /usr/bin/mount "${args[@]}" -o newinstance,ptmxmode=0666; then exit 0; fi
+    /usr/bin/mount --rbind /dev/pts "$target"
+    exec /usr/bin/mount --make-rslave "$target"
+fi
+if [[ $mount_type == proc && $target == */proc ]] && scoped_root "${target%/proc}"; then
+    if /usr/bin/mount "${args[@]}"; then exit 0; fi
+    /usr/bin/mount --rbind /proc "$target"
+    exec /usr/bin/mount --make-rslave "$target"
+fi
+if [[ $mount_type == sysfs && $target == */sys ]] && scoped_root "${target%/sys}"; then
+    # A user namespace sharing the host network namespace may only bind sysfs.
+    # Report a failure only if the supported read-only fallback also fails.
+    if /usr/bin/mount "${args[@]}" 2>/dev/null; then exit 0; fi
+    /usr/bin/mount --rbind /sys "$target"
+    /usr/bin/mount --make-rslave "$target"
+    exec /usr/bin/mount -o remount,bind,ro "$target"
+fi
+exec /usr/bin/mount "${args[@]}"

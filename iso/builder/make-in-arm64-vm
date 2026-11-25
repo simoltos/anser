@@ -1,0 +1,30 @@
+#!/bin/bash
+set -euo pipefail
+
+# The local launcher owns the VM and its signed package cache.
+project=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd -P)
+cd -- "$project"
+vm_dir=.build/arm64-builder
+runner=$vm_dir/run-vm
+if [[ ! -x $runner ]]; then
+    printf 'Prepare the ARM64 builder VM at %s or run the builder inside an ARM64 guest.\n' "$vm_dir" >&2
+    exit 1
+fi
+
+exec 9<"$vm_dir"
+flock -n 9 || { printf 'Another ARM64 build is active.\n' >&2; exit 1; }
+mkdir -p out
+work=$(mktemp -d "$project/out/.build-aarch64-XXXXXX")
+trap 'rm -rf -- "$work"' EXIT
+tar -cf "$work/project.tar" LICENSE iso system
+"$project/iso/test/limited" env ANSER_ARM64_VM_SOURCE="$work/project.tar" ANSER_ARM64_VM_OUTPUT="$work" "$project/$runner"
+
+shopt -s nullglob
+images=("$work"/anser-[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]-aarch64.iso)
+if (( ${#images[@]} != 1 )) || [[ ! -s ${images[0]} || -L ${images[0]} ]]; then
+    printf 'The ARM64 guest did not produce a complete ISO.\n' >&2
+    exit 1
+fi
+iso=out/${images[0]##*/}
+mv -T -- "${images[0]}" "$iso"
+printf 'Built %s\n' "$iso"

@@ -1,0 +1,450 @@
+#!/usr/bin/env python3
+"""Drive an offline encrypted install on a disposable QEMU disk through the real wizard."""
+
+import argparse
+import contextlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from PIL import Image, ImageOps
+
+PROJECT = Path(__file__).resolve().parents[2]
+PASSWORD = 'anser2468'
+REINSTALL_PASSWORD = 'anser3579'
+USER = 'tester'
+
+
+def run(*args, **kwargs):
+    return subprocess.run(args, check=True, **kwargs)
+
+
+class VM:
+    def __init__(self, directory, iso, args, attempt):
+        self.dir = directory
+        self.iso = iso
+        self.args = args
+        self.attempt = attempt
+        self.text = ''
+        self.report = directory / (attempt + '.guest')
+        self.frame = directory / 'frame.png'
+        self.cpu_start = 0
+        self.cpu_seconds = 0
+        self.peak_rss = 0
+
+    def sample(self, reset=False):
+        proc = Path('/proc') / str(self.process.pid)
+        try:
+            fields = (proc / 'stat').read_text().split(') ', 1)[1].split()
+            cpu = (int(fields[11]) + int(fields[12])) / os.sysconf('SC_CLK_TCK')
+            status = (proc / 'status').read_text().splitlines()
+        except FileNotFoundError:
+            return
+        rss = next((int(line.split()[1]) * 1024 for line in status if line.startswith('VmRSS:')), 0)
+        if reset:
+            self.cpu_start = cpu
+            self.peak_rss = 0
+        self.cpu_seconds = cpu - self.cpu_start
+        self.peak_rss = max(self.peak_rss, rss)
+
+    def __enter__(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='anser-inst-vm-')
+        control = Path(self.tmp.name) / 'qmp'
+        serial = Path(self.tmp.name) / 'serial'
+        self.serial_link = self.dir / (self.attempt + '.console')
+        self.serial_link.unlink(missing_ok=True)
+        self.serial_link.symlink_to(serial)
+        media = []
+        if self.iso:
+            media = [
+                '-drive',
+                f'file={self.iso},if=none,readonly=on,cache=none,format=raw,id=media,media=cdrom',
+                '-device',
+                'ide-cd,bus=ide.0,drive=media,bootindex=1',
+            ]
+        command = [
+            'qemu-system-x86_64',
+            '-machine',
+            'q35,accel=kvm',
+            '-cpu',
+            'host',
+            '-smp',
+            '4',
+            '-m',
+            '4096',
+            '-drive',
+            'if=pflash,format=raw,unit=0,readonly=on,file=/usr/share/edk2/x64/OVMF_CODE.4m.fd',
+            '-drive',
+            f'if=pflash,format=raw,unit=1,file={self.dir}/vars.fd',
+            '-drive',
+            f'file={self.dir}/disk.qcow2,format=qcow2,cache=none,if=none,id=target',
+            '-device',
+            'virtio-blk-pci,drive=target,bootindex=2',
+            *media,
+            '-drive',
+            f'file={self.dir}/probe.iso,if=none,readonly=on,format=raw,id=probe,media=cdrom',
+            '-device',
+            'ide-cd,bus=ide.1,drive=probe',
+            '-nic',
+            'none',
+            '-vga',
+            'none',
+            '-device',
+            'virtio-vga',
+            '-device',
+            'virtio-rng-pci',
+            '-device',
+            'virtio-serial-pci',
+            '-chardev',
+            f'file,id=report,path={self.report}',
+            '-device',
+            'virtserialport,chardev=report,name=anser.check',
+            '-display',
+            'none',
+            '-qmp',
+            f'unix:{control},server=on,wait=off',
+            '-chardev',
+            f'socket,id=uart,path={serial},server=on,wait=off,logfile={self.dir}/{self.attempt}.serial',
+            '-serial',
+            'chardev:uart',
+            '-no-reboot',
+        ]
+        self.log = (self.dir / (self.attempt + '.qemu')).open('w')
+        self.process = subprocess.Popen(command, stdout=self.log, stderr=self.log)
+        self.sock = socket.socket(socket.AF_UNIX)
+        for _ in range(150):
+            if self.process.poll() is not None:
+                raise RuntimeError(self.log.name)
+            try:
+                self.sock.connect(str(control))
+                break
+            except (ConnectionRefusedError, FileNotFoundError):
+                time.sleep(0.1)
+        self.stream = self.sock.makefile('rwb', buffering=0)
+        json.loads(self.stream.readline())
+        self.qmp('qmp_capabilities')
+        return self
+
+    def qmp(self, cmd, **args):
+        self.stream.write(json.dumps(dict(execute=cmd, arguments=args)).encode() + b'\n')
+        while True:
+            msg = json.loads(self.stream.readline())
+            if 'error' in msg:
+                raise RuntimeError(msg['error'])
+            if 'return' in msg:
+                return msg['return']
+
+    def key(self, key):
+        response = self.qmp('human-monitor-command', **{'command-line': f'sendkey {key} 30'})
+        if response.strip():
+            raise ValueError(response)
+        time.sleep(0.1)
+
+    def type(self, text):
+        keys = {
+            ' ': 'spc',
+            '/': 'slash',
+            '-': 'minus',
+            ':': 'shift-semicolon',
+            ';': 'semicolon',
+            '_': 'shift-minus',
+            '.': 'dot',
+            '=': 'equal',
+            '>': 'shift-dot',
+            '|': 'shift-backslash',
+            "\n": 'ret',
+        }
+        for ch in text:
+            self.key(keys.get(ch, ('shift-' + ch.lower()) if ch.isupper() else ch))
+
+    def shot(self, name=None):
+        path = self.frame if name is None else self.dir / (self.attempt + '-' + name + '.png')
+        self.qmp('screendump', filename=str(path), format='png')
+        return path
+
+    def read(self):
+        self.sample()
+        shot = self.shot()
+        with Image.open(shot) as screen:
+            im = ImageOps.invert(screen.convert('L')).resize((screen.width * 2, screen.height * 2))
+            im.point(lambda p: 255 if p >= 127 else 0).save(self.dir / 'ocr.png')
+        if self.args.ocr_root:
+            cmd = [
+                'bwrap',
+                '--ro-bind',
+                str(self.args.ocr_root),
+                '/',
+                '--dev',
+                '/dev',
+                '--proc',
+                '/proc',
+                '--tmpfs',
+                '/tmp',
+                '--ro-bind',
+                str(self.dir),
+                '/mnt',
+                '/usr/bin/tesseract',
+                '/mnt/ocr.png',
+                'stdout',
+                '--psm',
+                '6',
+            ]
+        else:
+            cmd = ['tesseract', str(self.dir / 'ocr.png'), 'stdout', '--psm', '6']
+        self.text = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+        return self.text
+
+    def until(self, pattern, timeout=70):
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
+            if self.process.poll() is not None:
+                raise RuntimeError('VM exited')
+            if re.search(pattern, self.read(), re.I):
+                print(self.attempt, 'screen', pattern, flush=True)
+                return self.text
+            if re.search('installation stopped|installation failed', self.text, re.I):
+                raise RuntimeError(self.text)
+            time.sleep(0.6)
+        raise TimeoutError(f'{pattern}: {self.text}')
+
+    def probe(self, mode, live=False):
+        preview = mode == 'preview'
+        login_password = REINSTALL_PASSWORD if self.args.preserve else PASSWORD
+        self.key('ctrl-alt-f3')
+        self.until('login:', 25)
+        self.type(('anser-live' if preview else 'root' if live else USER) + '\n')
+        if not live and not preview:
+            time.sleep(0.4)
+            self.type(login_password + '\n')
+        time.sleep(1.2)
+        command = (
+            "mkdir -p /run/check; mount -o ro /dev/disk/by-label/ANSER_CHECK /run/check; bash /run/check/guest-probe "
+            + mode
+        )
+        if preview:
+            self.type('sudo -n -s\n')
+            time.sleep(0.6)
+        elif not live:
+            self.type('sudo -s\n')
+            time.sleep(0.7)
+            self.type(login_password + '\n')
+            time.sleep(0.6)
+        self.type(command + ('; systemctl poweroff' if not live and not preview else '') + '\n')
+        for _ in range(70):
+            data = self.report.read_text(errors='replace') if self.report.exists() else ''
+            done = re.search(r'^PROBE_EXIT=(\d+)$', data, re.M)
+            if done:
+                marker = 'PREVIEW_DESKTOP_OK' if preview else 'INSTALLED_DESKTOP_OK'
+                if mode != 'diag' and (marker not in data or int(done[1]) != 0):
+                    raise RuntimeError(data[-900:])
+                if preview:
+                    self.type('exit\n')
+                    self.type('uwsm stop\n')
+                elif not live:
+                    self.process.wait(timeout=45)
+                return data
+            time.sleep(1)
+        raise TimeoutError('guest probe: ' + self.read())
+
+    def __exit__(self, typ, value, tb):
+        if typ and self.process.poll() is None:
+            with contextlib.suppress(Exception):
+                self.shot('failure')
+            if self.iso:
+                with contextlib.suppress(Exception):
+                    self.probe('diag', live=True)
+        if self.process.poll() is None:
+            with contextlib.suppress(Exception):
+                self.qmp('quit')
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+        self.sock.close()
+        self.log.close()
+        self.tmp.cleanup()
+        self.serial_link.unlink(missing_ok=True)
+
+
+def wizard(vm, keep):
+    vm.until('Linux by DHH|Try live|Start Install', 150)
+    vm.shot('welcome')
+    vm.key('ret')
+    vm.until('Arabic|keyboard layout')
+    if 'arabic' in vm.text.lower():
+        vm.key('ret')
+        vm.until('keyboard layout')
+    vm.key('ret')
+    vm.until('Timezone')
+    vm.key('ret')
+    account_password = REINSTALL_PASSWORD if keep else PASSWORD
+    for prompt, answer in [
+        ('Username', USER),
+        ('Passu?word|for user|disk encryption when', account_password),
+        ('Must match|Confirm', account_password),
+        ('Hostname', 'anserbench'),
+    ]:
+        vm.until(prompt)
+        vm.type(answer + '\n')
+    vm.until('look right')
+    vm.key('ret')
+    vm.until('install disk|installation disk|select.*disk')
+    vm.key('ret')
+    vm.until('installation mode|recovery possible')
+    if 'installation mode' in vm.text.lower():
+        if keep:
+            vm.until(r'keep\s+/?home')
+            vm.shot('preserve-menu')
+            vm.key('home')
+            vm.key('down')
+            if re.search('free space install', vm.text, re.I):
+                vm.key('down')
+        vm.key('ret')
+    if keep:
+        vm.until('passphrase|encryption password')
+        vm.type(PASSWORD + '\n')
+        vm.until('keep /home|/home/tester|keep the existing')
+        vm.key('left')
+    else:
+        vm.until('recovery possible')
+    vm.shot('confirmation')
+    start = time.monotonic()
+    vm.sample(reset=True)
+    vm.key('ret')
+    vm.until('Reboot No[wuv]+|reboot now', 650)
+    vm.shot('finished')
+    installed = time.monotonic()
+    vm.key('ret')
+    vm.process.wait(timeout=50)
+    return start, installed
+
+
+def boot_installed(vm):
+    # Plymouth's graphical prompt can appear before its text is visible.
+    time.sleep(7)
+    for _ in range(15):
+        vm.type(PASSWORD + '\n')
+        for _ in range(5):
+            time.sleep(0.8)
+            text = vm.read()
+            if re.search(
+                'Keybindings|Setup Git|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday',
+                text,
+                re.I,
+            ):
+                vm.shot('desktop')
+                return time.monotonic()
+    raise TimeoutError('installed desktop: ' + vm.text)
+
+
+def try_live(vm):
+    vm.until('Try live', 150)
+    vm.key('tab')
+    vm.key('ret')
+    vm.until('Keybindings|Setup Git|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday', 160)
+    vm.shot('desktop')
+    vm.probe('preview')
+    vm.until('Try live', 150)
+    vm.shot('returned')
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('iso', type=Path)
+    ap.add_argument('report', type=Path)
+    ap.add_argument('--ocr-root', type=Path)
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument('--preserve', action='store_true')
+    mode.add_argument('--try-live', action='store_true')
+    opts = ap.parse_args()
+    if os.environ.get('ANSER_TEST_UNIT') != '1':
+        limit = PROJECT / 'iso/test/limited'
+        os.execv(limit, [str(limit), str(Path(__file__).resolve()), *sys.argv[1:]])
+    opts.iso = opts.iso.resolve(strict=True)
+    if opts.ocr_root is None and not shutil.which('tesseract'):
+        opts.ocr_root = PROJECT / '.build/installer-evaluation/ocr/root'
+    if opts.ocr_root and not (opts.ocr_root / 'usr/bin/tesseract').is_file():
+        ap.error('Tesseract is required in PATH or in the root passed to --ocr-root')
+    d = opts.report.resolve()
+    opts.ocr_root = opts.ocr_root.resolve() if opts.ocr_root else None
+    if opts.preserve:
+        if not (d / 'install.json').is_file():
+            ap.error('requires a completed test installation')
+        shutil.copyfile('/usr/share/edk2/x64/OVMF_VARS.4m.fd', d / 'vars.fd')
+    else:
+        d.mkdir(parents=True, exist_ok=False)
+        run('qemu-img', 'create', '-q', '-f', 'qcow2', str(d / 'disk.qcow2'), '64G')
+        shutil.copyfile('/usr/share/edk2/x64/OVMF_VARS.4m.fd', d / 'vars.fd')
+        run(
+            'bwrap',
+            '--ro-bind',
+            str(PROJECT / '.build/root'),
+            '/',
+            '--dev',
+            '/dev',
+            '--proc',
+            '/proc',
+            '--bind',
+            str(d),
+            '/mnt',
+            '--ro-bind',
+            str(Path(__file__).resolve().parent),
+            '/opt',
+            'xorriso',
+            '-as',
+            'mkisofs',
+            '-quiet',
+            '-R',
+            '-V',
+            'ANSER_CHECK',
+            '-o',
+            '/mnt/probe.iso',
+            '-graft-points',
+            'guest-probe=/opt/guest-probe',
+        )
+    if opts.try_live:
+        with VM(d, opts.iso, opts, 'try') as vm:
+            try_live(vm)
+        extents = json.loads(
+            subprocess.check_output(['qemu-img', 'map', '--output=json', d / 'disk.qcow2'])
+        )
+        if any(x['data'] for x in extents):
+            raise RuntimeError('Try live wrote to the blank system disk')
+        result = dict(iso=opts.iso.name, desktop=True, returned_to_installer=True, disk_bytes_written=0)
+        (d / 'try.json').write_text(json.dumps(result, indent=2) + '\n')
+        print('Try live reached the desktop, logged out to Install and left the target disk empty.')
+        return
+    case = 'preserve' if opts.preserve else 'install'
+    with VM(d, opts.iso, opts, case) as vm:
+        start, installed = wizard(vm, opts.preserve)
+        install_cpu, install_rss = vm.cpu_seconds, vm.peak_rss
+    with VM(d, None, opts, case + '-boot') as vm:
+        desktop = boot_installed(vm)
+        total_cpu = install_cpu + vm.cpu_seconds
+        peak_rss = max(install_rss, vm.peak_rss)
+        proof = vm.probe('preserved' if opts.preserve else 'installed')
+    marker = [l for l in proof.splitlines() if l.startswith('HOME_')]
+    if opts.preserve and json.loads((d / 'install.json').read_text())['home'] != marker:
+        raise RuntimeError('preserved home changed')
+    result = dict(
+        iso=opts.iso.name,
+        install_seconds=round(installed - start, 2),
+        confirmation_to_desktop_s=round(desktop - start, 2),
+        home=marker,
+        package_inventory_sha256=re.search(r'^SYSTEM_PACKAGES=([a-f0-9]{64})$', proof, re.M)[1],
+        qemu_cpu_s_sampled=round(total_cpu, 2),
+        qemu_peak_rss_bytes_sampled=peak_rss,
+    )
+    (d / (case + '.json')).write_text(json.dumps(result, indent=2) + '\n')
+    print(json.dumps(result), flush=True)
+
+
+if __name__ == '__main__':
+    main()

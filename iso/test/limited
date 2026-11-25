@@ -1,0 +1,9 @@
+#!/bin/bash
+# Keep the entire evaluation, including QEMU, OCR and descendants, below one host budget.
+set -eu
+if [[ ${ANSER_TEST_UNIT:-} == 1 ]]; then exec "$@"; fi
+exec flock "${XDG_RUNTIME_DIR:?}/anser-iso-evaluation.lock" systemd-run --user --collect \
+    --unit=anser-iso-evaluation --wait --pipe --quiet --service-type=exec \
+    -p MemoryAccounting=yes -p MemoryHigh=4608M -p MemoryMax=5504M -p MemorySwapMax=0 \
+    -p CPUQuota=350% -p Nice=10 -p IOWeight=20 --working-directory="$PWD" \
+    --setenv=ANSER_TEST_UNIT=1 -- "$@"

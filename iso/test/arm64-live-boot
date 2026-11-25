@@ -1,0 +1,35 @@
+#!/bin/bash
+set -euo pipefail
+
+if (( $# < 1 || $# > 2 )) || [[ -n ${2-} && $2 != --window ]]; then
+    printf 'Usage: iso/test/arm64-live-boot ISO [--window]\n' >&2
+    exit 2
+fi
+iso=$1
+[[ -r $iso ]] || { printf 'Cannot read ISO: %s\n' "$iso" >&2; exit 1; }
+qemu=${QEMU_AARCH64:-qemu-system-aarch64}
+firmware=${ANSER_ARM64_FIRMWARE:-/usr/share/edk2/aarch64}
+case $(uname -m) in
+    aarch64)
+        if [[ -r /dev/kvm && -w /dev/kvm ]]; then
+            acceleration=(-accel kvm -cpu host)
+        else
+            acceleration=(-accel tcg,thread=multi -cpu cortex-a72)
+        fi ;;
+    *) acceleration=(-accel tcg,thread=multi -cpu cortex-a72) ;;
+esac
+
+display=(-display none -serial mon:stdio)
+if [[ ${2:-} == --window ]]; then
+    display=(-display gtk -device virtio-gpu-pci -device qemu-xhci -device usb-kbd -device usb-tablet)
+fi
+
+state=$(mktemp -d)
+cp -- "$firmware/QEMU_VARS.fd" "$state/vars.fd" || { rmdir -- "$state"; exit 1; }
+trap 'rm -- "$state/vars.fd"; rmdir -- "$state"' EXIT
+"$qemu" -machine virt,gic-version=3 "${acceleration[@]}" -smp 2 -m 3072 \
+    -drive "if=pflash,format=raw,readonly=on,file=$firmware/QEMU_EFI.fd" \
+    -drive "if=pflash,format=raw,file=$state/vars.fd" \
+    -drive "if=none,id=medium,format=raw,readonly=on,media=cdrom,file=${iso//,/,,}" \
+    -device virtio-scsi-pci,id=scsi -device scsi-cd,bus=scsi.0,drive=medium,bootindex=0 \
+    -device virtio-rng-pci -nic none "${display[@]}"

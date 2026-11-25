@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export LC_ALL=C
+project=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd -P)
+cd -- "$project"
+
+case ${1-} in
+    make) worker=(/project/iso/builder/build-iso.sh) ;;
+    fetch|status|clean) worker=(python /project/iso/builder/lib/packages.py "$1") ;;
+    *) printf 'Expected make, fetch, status or clean.\n' >&2; exit 2 ;;
+esac
+operation=$1
+shift
+
+host_arch=$(uname -m)
+arch=$host_arch
+if [[ ${1-} == --arch ]]; then
+    if (( $# < 2 )); then
+        printf '%s\n' '--arch requires x86_64 or aarch64.' >&2
+        exit 2
+    fi
+    arch=$2
+    shift 2
+fi
+case $arch in
+    x86_64)
+        build_state=.build
+        build_root=.build/root
+        package_cache=.cache
+        pacman_profile=system/default/pacman
+        ;;
+    aarch64)
+        build_state=.build/aarch64
+        build_root=.build/root-aarch64
+        package_cache=.cache/aarch64
+        pacman_profile=system/default/pacman/aarch64
+        ;;
+    *) printf 'Expected --arch x86_64 or --arch aarch64.\n' >&2; exit 2 ;;
+esac
+if [[ $operation == make || $operation == fetch ]] && (( $# )); then
+    printf 'iso %s: unexpected argument %s\n' "$operation" "$1" >&2; exit 2
+fi
+if [[ $arch != "$host_arch" ]]; then
+    if [[ $operation == make && $host_arch == x86_64 && $arch == aarch64 ]]; then
+        exec "$project/iso/builder/make-in-arm64-vm"
+    fi
+    printf 'Run %s for %s on a host or VM with that architecture.\n' "$operation" "$arch" >&2
+    exit 1
+fi
+
+if [[ ! -x $build_root/usr/bin/mkarchiso ]]; then
+    printf 'Missing Archiso environment in %s.\n' "$build_root" >&2; exit 1
+fi
+pacman_conf=$pacman_profile/pacman-stable.conf
+if [[ $arch == aarch64 ]]; then
+    pacman_conf=iso/configs/pacman-online-aarch64.conf
+fi
+exec 9<.build
+flock -n 9 || { printf 'Another ISO operation is active.\n' >&2; exit 1; }
+
+mounts=(--unshare-net)
+case $operation in
+    fetch)
+        for dir in .cache "$package_cache" "$package_cache/packages" "$build_state" "$build_state/repositories" "$build_state/work"; do
+            [[ ! -L $dir ]] || { printf 'iso: linked directory %s\n' "$dir" >&2; exit 1; }
+        done
+        mkdir -p "$package_cache/packages" "$build_state/repositories" "$build_state/work"
+        fetch_etc=$(mktemp -d)
+        trap 'chmod -R u+w "$fetch_etc"; rm -rf -- "$fetch_etc"' EXIT
+        cp -a "$build_root/etc/." "$fetch_etc/"
+        chmod u+w "$fetch_etc"
+        install -m644 /etc/resolv.conf "$fetch_etc/resolv.conf"
+        mounts=(--ro-bind "$fetch_etc" /etc
+            --bind "$project/$build_state/work" "/project/$build_state/work"
+            --bind "$project/$package_cache" "/project/$package_cache"
+            --bind "$project/$build_state/repositories" "/project/$build_state/repositories")
+        ;;
+    make)
+        mkdir -p "$build_state/work" out
+        mounts+=(--bind "$project/$build_state/work" "/project/$build_state/work" --bind "$project/out" /project/out)
+        ;;
+    clean)
+        target=$package_cache/packages
+        for option in "$@"; do
+            case $option in --out|--out=*) target=out ;; esac
+        done
+        [[ $(realpath -m -- "$target") == "$project/$target" ]] || { printf 'iso: linked directory %s\n' "$target" >&2; exit 1; }
+        if [[ -d $target ]]; then mounts+=(--bind "$project/$target" "/project/$target"); fi
+        ;;
+esac
+
+unshare --map-auto --map-root-user --mount --propagation private -- \
+    bwrap --unshare-pid --unshare-ipc --cap-add ALL --die-with-parent \
+    --ro-bind "$project/$build_root" / --proc /proc --dev /dev --ro-bind /sys /sys \
+    --tmpfs /run --tmpfs /tmp --chmod 1777 /tmp --tmpfs /root \
+    --ro-bind "$project" /project "${mounts[@]}" \
+    --ro-bind "$project/$pacman_conf" /etc/pacman.conf \
+    --ro-bind "$project/$pacman_profile/mirrorlist-stable" /etc/pacman.d/mirrorlist --tmpfs /etc/pacman.d/gnupg \
+    --tmpfs /var/cache/pacman/pkg --clearenv --setenv HOME /root --setenv LC_ALL C \
+    --setenv ANSER_ARCH "$arch" --setenv ANSER_BUILD_STATE "$build_state" --setenv ANSER_CACHE "$package_cache" \
+    --setenv PATH /project/iso/builder/lib:/usr/bin --chdir /project "${worker[@]}" "$@"

@@ -1,0 +1,22 @@
+#!/usr/bin/bash
+set -euo pipefail
+if [[ -z ${ANSER_HOOKS:-} || $1 != -C || ! -f $2 ]]; then
+    exec unshare --mount --propagation private -- /usr/bin/pacstrap "$@"
+fi
+base_conf=$2
+live_conf="$base_conf.live"
+sed "/^HookDir =/a HookDir = $ANSER_HOOKS/live" "$2" > "$live_conf"
+shift 2
+options=()
+while (( $# )) && [[ $1 != -- ]]; do options+=("$1"); shift; done
+[[ ${1:-} == -- ]]
+shift
+root=$1
+shift
+run=(unshare --mount --propagation private -- /usr/bin/pacstrap)
+# CUPS creates its system group in a post-transaction hook. Omarchy's
+# settings package uses the group in its install script.
+bootstrap_conf="$live_conf.bootstrap"
+sed "/^HookDir =/a HookDir = $ANSER_HOOKS/bootstrap" "$base_conf" > "$bootstrap_conf"
+"${run[@]}" -C "$bootstrap_conf" "${options[@]}" -- "$root" base cups
+exec "${run[@]}" -C "$live_conf" "${options[@]}" -- "$root" --needed "$@"

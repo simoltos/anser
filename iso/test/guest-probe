@@ -1,0 +1,89 @@
+#!/bin/bash
+set -euo pipefail
+exec >/dev/virtio-ports/anser.check 2>&1
+trap 'echo PROBE_EXIT=$?' EXIT
+trap 'echo "FAILED at line $LINENO: $BASH_COMMAND"' ERR
+case $1 in
+  diag)
+    cat /proc/cmdline
+    systemctl --failed --no-pager
+    findmnt /run/anser-base/system || true
+    tail -80 /run/anser-base/prepare.log || true
+    ls -la /run/anser-base/ /run/nextroot || true
+    journalctl -b --no-pager -u anser-try-session -u anser-medium-verify -u getty@tty1 -n 50
+    tail -90 /var/log/omarchy-install.log || true
+    journalctl -b --no-pager -n 60
+    ;;
+  preview)
+    base=/run/anser-base/system
+    test "$(findmnt -nro FSTYPE /)" = overlay
+    findmnt -nro FS-OPTIONS / | grep -F "lowerdir=$base"
+    findmnt -nro VFS-OPTIONS --mountpoint "$base" | tr ',' '\n' | grep -qx ro
+    test -f /etc/anser/preview-ready
+    test -e /home/anser-live/.local/state/omarchy/done/finalize-user
+    systemctl is-active --quiet anser-try-session.service
+    pgrep -xu anser-live Hyprland >/dev/null
+    runuser -u anser-live -- sudo -n true
+    temp=$(mktemp -d)
+    pacman --root "$base" -Q | LC_ALL=C sort >"$temp/base"
+    pacman -Q | LC_ALL=C sort >"$temp/preview"
+    LC_ALL=C comm -23 "$temp/base" "$temp/preview" >"$temp/missing"
+    test ! -s "$temp/missing"
+    runuser -u anser-live -- touch /home/anser-live/anserpreview
+    echo PREVIEW_DESKTOP_OK
+    ;;
+  installed|preserved)
+    uname -r
+    cat /etc/fstab
+    findmnt -rn -o TARGET,FSTYPE,FSROOT | grep -E '^(/ |/home |/boot |/var/(log |cache/pacman/pkg ))'
+    findmnt -nr -o SOURCE,FSTYPE,OPTIONS /
+    for spec in /:@ /home:@home /var/log:@log /var/cache/pacman/pkg:@pkg; do
+      point=${spec%:*}
+      subvol=${spec#*:}
+      test "$(findmnt -nro FSTYPE --mountpoint "$point")" = btrfs
+      test "$(findmnt -nro FSROOT --mountpoint "$point")" = "/$subvol"
+    done
+    test "$(findmnt -nro FSTYPE --mountpoint /boot)" = vfat
+    esp=$(findmnt -nro SOURCE --mountpoint /boot)
+    test "$(lsblk -dnro PARTTYPE "$esp")" = c12a7328-f81f-11d2-ba4b-00a0c93ec93b
+    test "$(blockdev --getsize64 "$esp")" = 2147483648
+    test -f /boot/limine.conf
+    test -e /boot/EFI/Linux/omarchy_linux-omarchy.efi || ls /boot/EFI/Linux/*.efi
+    test -s /boot/EFI/BOOT/BOOTX64.EFI
+    lsblk -nr -o FSTYPE | grep -qx crypto_LUKS
+    test -d /home/tester && ! id anser-live 2>/dev/null
+    test ! -e /root/configurator
+    test ! -e /etc/profile.d/anser-live-session.sh
+    test ! -e /etc/initcpio/hooks/anser_base
+    template=/usr/share/omarchy/default/pacman
+    cmp /etc/pacman.conf "$template/pacman-stable.conf"
+    cmp /etc/pacman.d/mirrorlist "$template/mirrorlist-stable"
+    tmp=$(mktemp -d)
+    mount -o ro,subvolid=5 "$(findmnt -nro SOURCE / | cut -d'[' -f1)" "$tmp"
+    btrfs property get -ts "$tmp/@factory" ro | grep -qx 'ro=true'
+    umount "$tmp"; rmdir "$tmp"
+    id=$(id -u tester)
+    runtime=/run/user/$id
+    ready=0
+    for i in $(seq 1 50); do
+      signature=$(ls -t "$runtime/hypr" 2>/dev/null | head -1) || signature=
+      if [[ -n $signature ]] && runuser -u tester -- env XDG_RUNTIME_DIR="$runtime" HYPRLAND_INSTANCE_SIGNATURE="$signature" hyprctl -j layers | jq -e 'any(.. | objects; .namespace?=="omarchy-bar")' >/dev/null; then ready=1; break; fi
+      sleep 1
+    done
+    (( ready ))
+    marker=/home/tester/anser-install-check
+    if [[ $1 == installed ]]; then
+      runuser -u tester -- bash -c 'umask 027; printf "%s\n" "Anser preserved home" > "$1"; ln "$1" "$1.link"' -- "$marker"
+    fi
+    sync -f /home/tester
+    ls -lid -- "$marker" "$marker.link"
+    test "$marker" -ef "$marker.link"
+    echo "HOME_FS=$(findmnt -nro UUID --mountpoint /home)"
+    echo "HOME_USER=$(id -u tester):$(id -g tester)"
+    echo "HOME_ID=$(btrfs inspect-internal rootid /home)"
+    echo "HOME_FILE=$(stat -c '%u:%g:%a:%i' "$marker") $(sha256sum "$marker" | cut -d' ' -f1)"
+    echo "SYSTEM_PACKAGES=$(pacman -Q | LC_ALL=C sort | sha256sum | cut -d' ' -f1)"
+    pacman -Q archinstall >/dev/null 2>&1 && exit 1
+    echo INSTALLED_DESKTOP_OK
+    ;;
+esac

@@ -1,0 +1,182 @@
+#!/bin/bash
+set -euo pipefail
+root=$1
+
+prebuilt_uki_size_ok() {
+  local bytes limit=$((128 * 1024 * 1024))
+  bytes=$(stat -c %s "$1")
+  if ((bytes > limit)); then
+    echo "ERROR: the pre-built UKI is $bytes bytes, over the $limit limit (omacom/omarchy#5980)" >&2
+    return 1
+  fi
+}
+
+mkdir -p "$root/etc/kernel" "$root/etc/mkinitcpio.d" "$root/var/lib/omarchy-iso"
+# systemd.tty.term.console=dumb: see CONSOLE_NO_ANSI_QUERY in the orchestrator
+# (systemd's console size query hangs 1 boot in 10 with Plymouth on the VT).
+# This embedded cmdline is what boots under Secure Boot, where Limine's entry
+# options are ignored.
+cat >"$root/etc/kernel/cmdline" <<'CMDLINE'
+zswap.enabled=0 rootflags=subvol=@ rw rootfstype=btrfs initramfs_async=0 quiet splash loglevel=0 systemd.show_status=false rd.udev.log_level=0 vt.global_cursor_default=0 systemd.tty.term.console=dumb
+CMDLINE
+
+# The preset names the kernel version explicitly: mkinitcpio treats a glob in
+# ALL_kver as a literal path. It sets no ALL_microcode, which is deprecated;
+# the microcode hook in mkinitcpio.conf adds the microcode.
+image_kver=$(ls -1 "$root/usr/lib/modules/" | grep -E '^[0-9]+\.' | head -1)
+if [[ -z $image_kver ]]; then
+  echo "WARNING: no kernel version found under /usr/lib/modules/; skipping the UKI pre-build"
+else
+  # The kernel package this image carries: linux-omarchy since upstream made it
+  # the default, stock linux before. The installer names the UKI
+  # and its Limine entry after it.
+  image_kernel=$(<"$root/usr/lib/modules/${image_kver}/pkgbase")
+  echo "$image_kernel" >"$root/var/lib/omarchy-iso/prebuilt-uki.kernel"
+  # The early-loading modules configured when this UKI is built. A machine whose
+  # hardware scripts add to them (nvidia.sh, fix-t2.sh) builds its own UKI.
+  { grep -hE '^\s*MODULES\s*\+?=' "$root"/etc/mkinitcpio.conf.d/*.conf 2>/dev/null || true; } |
+    sed -E 's/\s+/ /g; s/^ //; s/ $//' | sort -u >"$root/var/lib/omarchy-iso/prebuilt-uki.modules"
+  # The console keymap this UKI is built with. omarchy_hooks.conf runs the
+  # `keymap` hook, which compiles the keymap named by /etc/vconsole.conf into
+  # the initramfs at build time, and bundles vconsole.conf itself for Plymouth.
+  # Both are fixed here, at image build, to whatever this image has: in
+  # practice nothing, so mkinitcpio falls back to us. The installer writes the
+  # user's choice into the target's /etc/vconsole.conf afterwards, which cannot
+  # reach an initramfs that is only copied, so an install picking another
+  # layout has to build its own UKI exactly as one adding modules does.
+  # Recording the value is what lets the installer tell the difference.
+  #
+  # The LUKS passphrase prompt runs from this initramfs, so a stale `us` makes
+  # a passphrase enrolled under another layout untypeable and locks the owner
+  # out of a fresh install (upstream omarchy#8196).
+  ( [ -f "$root/etc/vconsole.conf" ] && . "$root/etc/vconsole.conf"; printf '%s\n' "${KEYMAP:-}" ) \
+    >"$root/var/lib/omarchy-iso/prebuilt-uki.keymap"
+  cat >"$root/etc/mkinitcpio.d/${image_kernel}.preset" <<PRESET
+ALL_config="/etc/mkinitcpio.conf"
+ALL_kver="/usr/lib/modules/${image_kver}/vmlinuz"
+PRESETS=('default')
+default_uki="/var/lib/omarchy-iso/prebuilt-uki.efi"
+default_options="-S autodetect"
+PRESET
+
+  # The pre-built UKI's own config. Naming a config with -c makes mkinitcpio
+  # skip /etc/mkinitcpio.conf.d, which is where omarchy_hooks.conf sets the
+  # busybox hook list (udev ... encrypt): that list needs cryptdevice= and
+  # root= on the cmdline, which a build-time UKI cannot know. The systemd
+  # hook set needs neither: systemd-gpt-auto-generator finds the root
+  # partition by its GPT type, and if it is LUKS, sd-encrypt unlocks it at a
+  # passphrase prompt (plymouth draws it). One UKI for plain and encrypted
+  # installs; the first kernel update rebuilds it from the drop-ins as usual.
+  # Persistent dm-crypt flags (discards, no read workqueue) come from the LUKS2
+  # header, written by the installer at open time, not from the cmdline.
+  # limine-snapper-sync boots read-only snapshots through its busybox
+  # `btrfs-overlayfs` hook (an overlay with a tmpfs upper over the snapshot).
+  # The systemd initramfs has no equivalent, so a snapshot booted with the
+  # pre-built UKI would come up read-only. This is the same
+  # logic as a oneshot in the initrd: after sysroot.mount, before
+  # initrd-root-fs.target, mount an overlay on top of /sysroot when it is a
+  # read-only btrfs snapshot subvolume. Installed as an ordinary mkinitcpio
+  # hook so a systemd-hook rebuild would keep it too.
+  install -d "$root/usr/lib/initcpio/install" "$root/usr/lib/omarchy"
+  cat >"$root/usr/lib/omarchy/snapshot-overlay" <<'SCRIPT'
+#!/bin/bash
+# Mount an overlay over /sysroot when it is a read-only btrfs snapshot, so a
+# snapshot chosen from the boot menu is writable for the session (changes go
+# to a tmpfs and vanish on reboot), as limine-snapper-sync's busybox hook does.
+root=/sysroot
+[[ $(findmnt -no FSTYPE "$root" 2>/dev/null) == btrfs ]] || exit 0
+case $(findmnt -no SOURCE "$root" 2>/dev/null) in */snapshot*) ;; *) exit 0 ;; esac
+[[ $(btrfs property get -t subvol "$root" ro 2>/dev/null) == "ro=true" ]] || exit 0
+echo "[snapshot-overlay] $root is a read-only btrfs snapshot; mounting an overlay"
+ram=/run/omarchy-snapshot-overlay
+mkdir -p "$ram" && mount -t tmpfs cowspace "$ram" && mkdir -p "$ram/upper" "$ram/work" || exit 0
+mount -t overlay overlay -o "lowerdir=$root,upperdir=$ram/upper,workdir=$ram/work" "$root"   && echo "[snapshot-overlay] overlay mounted on $root"
+exit 0
+SCRIPT
+  chmod 0755 "$root/usr/lib/omarchy/snapshot-overlay"
+  cat >"$root/usr/lib/initcpio/install/sd-btrfs-overlayfs" <<'INSTALL'
+#!/usr/bin/env bash
+build() {
+    add_module btrfs
+    add_module overlay
+    add_binary btrfs
+    add_binary findmnt
+    add_binary mount
+    add_binary mkdir
+    add_binary bash
+    # add_systemd_unit also pulls in the unit's ExecStart binary.
+    add_systemd_unit omarchy-snapshot-overlay.service
+    add_symlink /usr/lib/systemd/system/initrd-root-fs.target.wants/omarchy-snapshot-overlay.service \
+        ../omarchy-snapshot-overlay.service
+}
+help() {
+    cat <<HELPEOF
+Systemd-initramfs twin of limine-snapper-sync's btrfs-overlayfs hook: boots a
+read-only btrfs snapshot with a tmpfs overlay so it is writable for the session.
+HELPEOF
+}
+INSTALL
+  chmod 0755 "$root/usr/lib/initcpio/install/sd-btrfs-overlayfs"
+  install -d "$root/usr/lib/systemd/system"
+  cat >"$root/usr/lib/systemd/system/omarchy-snapshot-overlay.service" <<'UNIT'
+[Unit]
+Description=Overlay for a read-only btrfs snapshot root (initrd)
+DefaultDependencies=no
+ConditionPathExists=/etc/initrd-release
+After=sysroot.mount
+Before=initrd-root-fs.target initrd-parse-etc.service
+Requires=sysroot.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/omarchy/snapshot-overlay
+UNIT
+
+  # No kms hook. With autodetect skipped it would add every DRM driver and its
+  # firmware (nouveau's GSP firmware alone is ~110 MB): the UKI measured 247 MiB
+  # with it. Limine boots a UKI as an EFI chainload into one contiguous block
+  # below 4 GiB, and UKIs that size panic it on some laptops
+  # (omacom/omarchy#5980), as a 241 MiB initramfs does GRUB (#128). Without
+  # kms, Plymouth's LUKS prompt draws on the firmware framebuffer (simpledrm);
+  # the installed system's own rebuilds autodetect and keep kms.
+  cat >"$root/etc/mkinitcpio-prebuilt-uki.conf" <<'CONF'
+MODULES=(thunderbolt)
+BINARIES=()
+FILES=()
+HOOKS=(base systemd plymouth autodetect microcode modconf keyboard sd-vconsole block sd-encrypt filesystems fsck sd-btrfs-overlayfs)
+COMPRESSION="zstd"
+CONF
+
+  # Room for the installer to write the real cmdline into the UKI in place
+  # (orchestrator/uki_cmdline.py): one placeholder parameter pads .cmdline to
+  # 1800 bytes, under the kernel's 2048. A dotted name is a module parameter
+  # to the kernel, so until it is overwritten it is ignored without a warning.
+  prebuilt_cmdline=$(tr -s '\n ' ' ' <"$root/etc/kernel/cmdline")
+  prebuilt_cmdline="${prebuilt_cmdline% } omarchy.cmdline_room="
+  printf '%s%s\n' "$prebuilt_cmdline" "$(printf '%*s' $((1800 - ${#prebuilt_cmdline})) '' | tr ' ' 0)" \
+    >"$root/etc/kernel/cmdline.prebuilt-uki"
+
+  echo "Pre-building the UKI in the image (kver=$image_kver, generic cmdline, systemd and sd-encrypt hooks, no autodetect)"
+  # mkinitcpio is called directly: the preset flow (-P) runs Limine's install
+  # hooks, which fail without a mounted ESP.
+  if unshare --mount --propagation private -- arch-chroot "$root" mkinitcpio \
+       -k "/usr/lib/modules/${image_kver}/vmlinuz" \
+       -c /etc/mkinitcpio-prebuilt-uki.conf \
+       --cmdline /etc/kernel/cmdline.prebuilt-uki \
+       -U /var/lib/omarchy-iso/prebuilt-uki.efi \
+       -S autodetect 2>&1 | tail -25 ; then
+    if [[ -f "$root/var/lib/omarchy-iso/prebuilt-uki.efi" ]]; then
+      echo "Pre-built UKI: $(du -h "$root/var/lib/omarchy-iso/prebuilt-uki.efi" | cut -f1)"
+      prebuilt_uki_size_ok "$root/var/lib/omarchy-iso/prebuilt-uki.efi" || exit 1
+    else
+      echo "WARNING: mkinitcpio ran but left no UKI; the installer will build one"
+    fi
+  else
+    echo "WARNING: mkinitcpio failed; the installer will build the UKI"
+    # Clean up any partial output that would upset btrfs shrink downstream.
+    rm -f "$root/var/lib/omarchy-iso/prebuilt-uki.efi"
+  fi
+  # Only this build uses these; the installed system has no use for them.
+  rm -f "$root/etc/mkinitcpio-prebuilt-uki.conf" "$root/etc/kernel/cmdline.prebuilt-uki"
+fi

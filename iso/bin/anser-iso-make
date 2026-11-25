@@ -1,0 +1,14 @@
+#!/bin/bash
+set -euo pipefail
+
+case ${1-} in
+    -h|--help)
+        printf '%s\n' 'Usage: iso/bin/anser-iso-make [--arch x86_64|aarch64]' \
+            'Build the Anser ISO from the local package cache.' \
+            'Defaults to the host architecture.'
+        exit 0
+        ;;
+esac
+
+project=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd -P)
+exec "$project/iso/builder/run" make "$@"

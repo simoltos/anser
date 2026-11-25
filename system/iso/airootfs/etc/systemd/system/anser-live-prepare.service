@@ -1,8 +1,0 @@
-[Unit]
-Description=Prepare the Anser live session
-Before=getty@tty1.service
-After=systemd-user-sessions.service
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/bash /usr/local/lib/anser/prepare-session
-RemainAfterExit=yes
